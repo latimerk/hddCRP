@@ -1,0 +1,29 @@
+[project]
+name = "hddCRP"
+version = "0.1"
+description = "Analysis tools for sequential behavioral data using a hierarchical distance-dependent Chinese restaurant process model."
+authors = [
+    {"name" = "Kenneth Latimer", "email" = "latimerkw@gmail.com"}
+]
+license = {"file" = "LICENSE"}
+readme = "README.md"
+requires-python = ">3.9"
+
+
+# Requirements
+dependencies = [
+    "numpy",
+    "scipy"
+]
+
+[build-system]
+requires = [
+    "setuptools"
+]
+build-backend = "setuptools.build_meta"
+
+
+[project.urls]
+homepage = "https://github.com/latimerk/hddCRP/"
+repository = "https://github.com/latimerk/hddCRP/"
+documentation = "https://github.com/latimerk/hddCRP/"
