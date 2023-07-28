@@ -9,6 +9,8 @@ from inspect import signature
 from scipy.special import softmax
 # from scipy.special import logsumexp
 
+import warnings
+
 class hddCRPModel():
     '''
     Holds info for a hierarchical distance dependent Chinese restaurant process (hddCRP) model where we have exact, discrete observations (N observations labeled 1 to M).
@@ -35,7 +37,7 @@ class hddCRPModel():
 
                             F is a function giving positive values and D_{nn,tt} is the distance. F should be decreasing (or constant) with distance
 
-                            F(D_{nn,tt}) is 1 if tt < n and 0 otherwise, everything becomes a set of CRPs.
+                            F(D_{nn,tt}) is 1 if tt < n and 0 otherwise, everything becomes a set of CRPs: that is, where all the observation probabilities are estimated with a (heirarchical) Dirichlet prior.
                             
                             If alpha_{1:(num_layers-1)} -> infinity (trends toward only self/back connections everywhere but the final layer), then each group in the bottom layer becomes an independent ddCRP
 
@@ -60,9 +62,9 @@ class hddCRPModel():
         Generates a valid initial state for starting inference. This uses the current numpy random state.
 
         Args
-          Y: (length N) The observations. Should be a list or numpy vector of non-negative integers. NaN or negative values indicate missing data to be inferred by the model.
+          Y: (length N) The observations. Should be a list or numpy vectors. NaN or None values indicate missing data to be inferred by the model.
              IF is None: The constructor will simulate from the hddCRP instead. Y_values must be valid.
-          groupings: (size N x (num_layers) The groups of observations at each level. If empty or None, then the model only has 1 layer containing all observations.
+          groupings: (array size N x num_layers) The groups of observations at each level. If empty or None, then the model only has 1 layer containing all observations.
           alpha: (length num_layers or scalar) The weight for the self-link or up-layer link the in the hddCRP. Can be per layer (scalar) or different for each layer (list).
           D: (size N x N x K) the distances between each point: can be parameterized by K variables per pair of observations.   
           Y_values: (length M) The possible values Y can take (redundant if all values observed - this is just in case). If None, it contains the unique
@@ -75,6 +77,9 @@ class hddCRPModel():
                 Example with only four observations:
                  Y = [0, 1, 1, 0]
                  Y_values = [0, 1] # binary data only
+                 # or could even be
+                 # Y = ['left, 'right', 'right', 'left']
+                 # Y_values = ['left', 'right']
                  D = [[ 0, -1, -2, -3]
                       [ 1,  0, -1, -2],
                       [ 2,  1,  0, -1],
@@ -99,42 +104,42 @@ class hddCRPModel():
         # sets _Y to a vector of ints. All negative numbers and nans are changed to a single index of UNKNOWN_OBSERVATION
         # makes the N property valid
         if(not Y is None):
-            self._Y = np.array(Y, dtype=float).flatten()
-            self._Y[np.isnan(self._Y) | self._Y < 0] = hddCRPModel.UNKNOWN_OBSERVATION;
+            self._Y = np.array(Y).flatten()
+            self._Y[np.isin(self._Y,None)] = np.nan
+            # self._Y[np.isnan(self._Y)] = hddCRPModel.UNKNOWN_OBSERVATION;
             self._Y = self._Y.astype(int)
 
             self._simulated_Y = False;
-            if(Y_values is None):
-                self._Y_values = np.unique(self._Y)
-
-        elif(not Y_values is None):
-            self._simulated_Y = True;
-            self._Y = np.zeros((D.shape[0])); # empty Y the shape of the weights
-        else:
-            raise ValueError("Y and Y_values cannot both be None")
 
 
         if(not Y_values is None):
             # If Y_values is given, sets it up as a vector similar to Y.
-            self._Y_values = np.array(Y_values, dtype=float).flatten()
-            self._Y_values[np.isnan(self._Y_values) | self._Y_values < 0] = hddCRPModel.UNKNOWN_OBSERVATION;
-            self._Y_values = np.unique(self._Y_values.astype(int))
+            self._Y_values = np.array(Y_values).flatten()
+        elif(not Y is None):
+            self._Y_values = np.unique(self._Y)
+
         # removes UNKNOWN_OBSERVATION from self._Y_values
-        self._Y_values = self._Y_values[self._Y_values != hddCRPModel.UNKNOWN_OBSERVATION];
+        self._Y_values = np.unique(self._Y_values[~np.isin(self._Y_values,[np.nan, None])]);
         # now that self._Y_values is set, M property is valid
+        if(Y is None):
+            # now that Y_values type is set up, creates space for a simulated Y
+            self._simulated_Y = True;
+            self._Y = np.nan((D.shape[0]), dtype=self._Y_values.dtype); # empty Y the shape of the weights
 
         #checks to see if all values of Y are in Y_values. Note that Y_values does not need to contain UNKNOWN_OBSERVATION
         assert np.all(np.isin(self._Y[self._Y != hddCRPModel.UNKNOWN_OBSERVATION], self._Y_values)), "Inconsistent labels in Y and Y_values found"
 
         # records values indicies of each type of Y
-        self._Y_unknowns = np.where(self._Y == hddCRPModel.UNKNOWN_OBSERVATION)[0];
+        self._Y_unknowns = np.where(self._Y == np.nan)[0];
         self._Y_indicies = [np.where(self._Y == xx)[0] for xx in self._Y_values];
 
         # sets up groupings: makes num_layers property valid
-        if(not self._groupings is None and np.size(self._groupings) >= 1):
-            self._groupings = np.array(groupings,dtype=int)
+        if(not groupings is None and len(groupings) >= 1):
+            self._groupings = np.array(groupings)
             if(self._groupings.ndim == 1):
                 self._groupings = self._groupings[:,np.newaxis];
+            if(self._groupings.shape[0] != self.N and self._groupings.shape[1] == self.N):
+                self._groupings = self._groupings.T;
 
             assert self._groupings.ndim == 2, "groupings must be a matrix (ndim == 2)"
             assert self._groupings.shape[0] == self.N, "number of rows of groupings must match number of observations"
@@ -153,6 +158,12 @@ class hddCRPModel():
             for gnum, lls in enumerate(ggs):
                 assert np.all(np.isnan(self._groupings_compact[lls,layer])), "invalid groupings: node can only belong to one group in each layer"
                 self._groupings_compact[lls,layer] = gnum;
+
+                if(layer == 0):
+                    if(len(ggs) > 0):
+                        warnings.warn("Base layer has multiple groups: this is not considered a typical case");
+                elif(len(np.unique(self._groupings_compact[lls,layer-1])) > 1):
+                    warnings.warn("Group " + str(gnum) + " in  layer " + str(layer) + " inherits nodes from multiple groups. This is not considered a typical case: this model is intended for a tree structure of node groups.");
         assert not np.any(np.isnan(self._groupings_compact)), "invalid groupings: all nodes must be assigned to a group in each layer"
 
         # sets up self connection weights
@@ -170,7 +181,6 @@ class hddCRPModel():
             # this section might not work properly in the extreme case of 1 observation, but you shouldn't be doing inferences of any sort in that case
         self._weights = np.zeros((self.N,self.N)); # the actual weights to be computed from the distances given the parameters and function
 
-
         # sets up the weighting function
         assert isinstance(weight_func, Callable), "weight_func must be a function"
         sig = signature(weight_func)
@@ -178,12 +188,10 @@ class hddCRPModel():
         self._weight_func = weight_func;
         assert self._weight_func(self._D[0,0,:], weight_params) >= 0, "weight function may not produce valid results" # tries running the weight function to make sure it works
 
-
         # sets up weighting function parameters: makes P, weight_params properties valid
         if(weight_params is None):
             weight_params = [];
         self.weight_params = np.array(weight_params);
-
 
         # now generates a random valid graph and labels tables for the initial point
         if(not self._simulated_Y):
@@ -292,14 +300,21 @@ class hddCRPModel():
         BaseMeasure_new = np.array(BaseMeasure_new).flatten();
         assert len(BaseMeasure_new) == self.M, "BaseMeasure is incorrect length"
         self._BaseMeasure = BaseMeasure_new/np.sum(BaseMeasure_new);
-        self._log_BaseMeasure = np.log(BaseMeasure_new) - np.log(np.sum(BaseMeasure_new));
 
-    @property
-    def log_BaseMeasure(self) -> np.ndarray:
-        '''
-        stores the log of the base measure for convenience in sampling
-        '''
-        return self._log_BaseMeasure;
+    '''
+    ==========================================================================================================================================
+    Some stats about the data
+    ==========================================================================================================================================
+    '''
+    def group_frequencies(self) -> list:
+        return [[{yy : np.mean(self._Y[self._group_indicies[layer][gg]] == yy) for yy in self._Y_values}
+                    for gg in self.num_groups[layer]]
+                    for layer in self.num_layers];
+    def group_counts(self) -> list:
+        return [[{yy : np.sum(self._Y[self._group_indicies[layer][gg]] == yy) for yy in self._Y_values}
+                    for gg in self.num_groups[layer]]
+                    for layer in self.num_layers];
+
     '''
     ==========================================================================================================================================
     Functions for generating a valid initial state
@@ -314,11 +329,20 @@ class hddCRPModel():
           Y complete overridden with new observations
           This sets up all internal variables that start with _C_
         '''
-        self._Y[:] = hddCRPModel.UNKNOWN_OBSERVATION;
+
+        # resets Y and Y indicies
+        self._Y[:] = np.nan;
+        self._Y_unknowns = np.where(self._Y == np.nan)[0];
+        self._Y_indicies = [np.where(self._Y == xx)[0] for xx in self._Y_values];
+
         self._initialize_connections(); # with everything set to unknown, this will just generate connections from the hddCRP
         self._initialize_table_labels();
         self._initialize_table_cycles();
         self._initialize_redraw_observations();
+
+        # now sets these up properly
+        self._Y_unknowns = np.where(self._Y == np.nan)[0];
+        self._Y_indicies = [np.where(self._Y == xx)[0] for xx in self._Y_values];
 
 
     def generate_random_connection_state(self) -> None:
@@ -728,9 +752,9 @@ class hddCRPModel():
         for ii in range(order.shape[0]):
             self._gibbs_sample_single_node(order[ii,0], order[ii,1]);
 
-    def _log_post_for_single_nodes_connections(self, node : int, layer : int ) -> tuple[list,np.ndarray]:
+    def _post_for_single_nodes_connections(self, node : int, layer : int ) -> tuple[list,np.ndarray]:
         '''
-        Gets the log posterior probability for each possible connection for one node given all the other connections 
+        Gets the posterior probability for each possible connection for one node given all the other connections 
 
         Args:
           node: int in range(self.N)
@@ -739,7 +763,7 @@ class hddCRPModel():
         Returns:
           tuple(can_connect_to, log_post)
             can_connect_to (int list, length R) all nodes (just node numbers, layer is implied) of possible connections
-            log_post (array length R) the log posterior probability of node connecting to each node in can_connect_to
+            post (array length R) the log posterior probability of node connecting to each node in can_connect_to
                                       up to a constant
         '''
 
@@ -765,11 +789,16 @@ class hddCRPModel():
 
         destination_Y = self._C_table_values[destination_tables];
 
-        # log probabilities of observing each table count that a move is associated with (connecting UNKNOWN_OBSERVATION to a known table will determine table type)
-        log_G_delta = np.zeros((can_connect_to.size));
+        # probabilities of observing each table count that a move is associated with (connecting UNKNOWN_OBSERVATION to a known table will determine table type)
+        # log_G_delta = np.zeros((can_connect_to.size));
+        # if(Y_type != hddCRPModel.UNKNOWN_OBSERVATION):
+        #     log_G_delta[:] = self.log_BaseMeasure[Y_type]
+        # log_G_delta[destination_Y != hddCRPModel.UNKNOWN_OBSERVATION] = self.log_BaseMeasure[destination_Y[destination_Y != hddCRPModel.UNKNOWN_OBSERVATION]];
+        G_delta = np.zeros((can_connect_to.size));
         if(Y_type != hddCRPModel.UNKNOWN_OBSERVATION):
-            log_G_delta[:] = self.log_BaseMeasure[Y_type]
-        log_G_delta[destination_Y != hddCRPModel.UNKNOWN_OBSERVATION] = self.log_BaseMeasure[destination_Y[destination_Y != hddCRPModel.UNKNOWN_OBSERVATION]];
+            G_delta[:] = self.BaseMeasure[Y_type]
+        G_delta[destination_Y != hddCRPModel.UNKNOWN_OBSERVATION] = self.BaseMeasure[destination_Y[destination_Y != hddCRPModel.UNKNOWN_OBSERVATION]];
+
 
         # label each node as splitting, combining, or the same
         if(self._C_is_cycle[node,layer]):
@@ -799,18 +828,23 @@ class hddCRPModel():
                     # otherwise, stays the same
                 table_count_delta[np.isin(can_connect_to, upstream_nodes)] += 1;
 
-        # log probability (up to a constant) of P(table observation values | connections)
-        log_p_Y = np.sum(log_G_delta * table_count_delta);
+        # probability (up to a constant) of P(table observation values | connections)
+        # log_p_Y = log_G_delta * table_count_delta;
+        p_Y = G_delta ** table_count_delta;
 
         # gets the log prior probability of each connection (up to a constant)
-        ws = self._F[node,can_connect_to]
-        ws[can_connect_to == node] = self.alpha[layer];
-        log_p_C = np.log(ws);
+        p_C = self._F[node,can_connect_to]
+        p_C[can_connect_to == node] = self.alpha[layer];
+        #log_p_C = np.log(p_C);
 
         # gets log posterior probability
-        log_post  = log_p_Y + log_p_C 
-        #log_post -= logsumexp(log_post);
-        return (can_connect_to, log_post)
+        # log_post  = log_p_Y + log_p_C 
+        # #log_post -= logsumexp(log_post);
+        # return (can_connect_to, log_post)
+
+        # gets  posterior probability
+        post = p_Y * p_C
+        return (can_connect_to, post)
 
     def _gibbs_sample_single_node(self, node : int, layer : int ) -> None:
         '''
@@ -823,10 +857,12 @@ class hddCRPModel():
         Results:
           Connection/table values can change
         '''
-        can_connect_to,log_post = self._log_post_for_single_nodes_connections(node, layer);
-        # gumbels = np.random.gumbel(size=can_connect_to.size)
-        # node_to = can_connect_to[np.argmax(log_post + gumbels)]
-        node_to = np.random.choice(can_connect_to, softmax(log_post))
+        # can_connect_to,log_post = self._log_post_for_single_nodes_connections(node, layer);
+        # # gumbels = np.random.gumbel(size=can_connect_to.size)
+        # # node_to = can_connect_to[np.argmax(log_post + gumbels)]
+        # node_to = np.random.choice(can_connect_to, softmax(log_post))
+        can_connect_to,post = self._post_for_single_nodes_connections(node, layer);
+        node_to = np.random.choice(can_connect_to, post/np.sum(post))
 
         self._set_connection(node, layer, node_to)
 
