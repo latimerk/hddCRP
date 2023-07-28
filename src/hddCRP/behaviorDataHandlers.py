@@ -15,21 +15,15 @@ def create_context_tree(seq : ArrayLike, depth : int = 3, delim : str = "-") -> 
     N = len(seq);
     assert N > 0, "seq can't be empty"
 
-
-
-    dt = '<U' + str(np.max([len(EMPTY_INDICATOR)] + [len(xx) for xx in seq]) + len(delim))*(depth-1)
-    grps = np.zeros((N,depth),dtype=dt)
-
-    append_func = np.vectorize(lambda x,y : x + delim + y)
-
+    grps = [['' for nn in range(N)] for dd in range(depth)]
     for dd in range(depth):
         if(dd > 0):
             for dd2 in range(dd,depth):
-                vv = append_func(seq, grps[:,dd2])
-                grps[:,dd2] = vv
+                grps[dd2] = [xx + delim + yy for xx,yy in zip(seq,grps[dd2])]
         seq =  np.roll(seq,1)
         seq[0] = EMPTY_INDICATOR
-    return grps
+    grps = np.array(grps)
+    return grps.T
 
 # Also, concatenate over sessions
 
