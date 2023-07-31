@@ -53,7 +53,7 @@ class hddCRPModel():
                        alpha : float | ArrayLike,
                        D : ArrayLike,
                        Y_values : ArrayLike = None, BaseMeasure : ArrayLike | None = None,
-                       weight_params : float | ArrayLike = 1, weight_func : Callable = lambda x, y : np.greater(x,0)*y) -> None:
+                       weight_params : float | ArrayLike = 1, weight_func : Callable = lambda x, y : np.greater(x,0)*y, weight_param_labels : list[str] = None) -> None:
         """
         Sets up a hierarchical distance dependent Chinese restaurant process (hddCRP) model.
         This is a basic model that assumes the observations are from a discrete distribution and fully observed (not a mixture model,
@@ -73,6 +73,7 @@ class hddCRPModel():
           weight_params: (length P) The parameters for the distance-to-weight function
           weight_func: (length K array - distances, length P array - params) -> non-negative scalar
                        Function for taking a single distance between two observations into the weight for connection from one node to the next in the hddCRP.
+          weight_param_labels: (length P) List of names for each of the weight_params values
         
                 Example with only four observations:
                  Y = [0, 1, 1, 0]
@@ -193,6 +194,12 @@ class hddCRPModel():
             weight_params = [];
         self.weight_params = np.array(weight_params);
 
+        if(weight_param_labels is None):
+            self._weight_param_labels = ["p" + str(xx) for xx in range(self.P)];
+        else:
+            assert len(weight_param_labels) == self.M, "incorrect number of weight_param_labels"
+            self._weight_param_labels = weight_param_labels;
+
         # now generates a random valid graph and labels tables for the initial point
         if(not self._simulated_Y):
             self.generate_random_connection_state();
@@ -204,6 +211,10 @@ class hddCRPModel():
     Includes model dimensions and variables that can be changed (alpha and weight_params)
     ==========================================================================================================================================
     '''
+
+    @property
+    def weight_param_labels(self) -> list[str]:
+        return self._weight_param_labels;
 
     @property
     def N(self) -> int:
