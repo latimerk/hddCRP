@@ -31,15 +31,14 @@ def create_context_tree_single_session(seq : ArrayLike, depth : int = 3, delim :
 def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   distinct_within_session_distance_params : bool = False,
                                                                             sequential_within_session_distances : bool = False,
                                                                             sequential_between_session_same_block_distances : bool = False,
-                                                                            sequential_between_session_different_block_distances : bool = True):
+                                                                            sequential_between_session_different_block_distances : bool = True,
+                                                                            within_block_disance_in_total_sessions : bool = True):
     block_ids = np.array(block_ids).flatten()
     assert len(seqs) == len(block_ids), "number of sequences and block_ids must be the same (number of trials)"
 
-    num_sessions = len(seqs)
+    # num_sessions = len(seqs)
     session_lengths = [np.size(xx) for xx in seqs];
     session_start_indexes = np.append(0,np.cumsum(session_lengths));
-    total_length = np.sum(session_lengths)
-
     total_observations = np.sum(session_lengths);
 
     block_types = np.unique(block_ids);
@@ -48,7 +47,7 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
 
     ##
     num_possible_parameters = (B ** 2) + (B if distinct_within_session_distance_params else 1);
-    D = np.zeros((total_length, total_length, num_possible_parameters))
+    D = np.zeros((total_observations, total_observations, num_possible_parameters))
     D.fill(np.inf)
     param_ctr = 0;
     param_names = [];
@@ -69,14 +68,17 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
         param_ctr += 1;
         param_names += ["within session - all (units: actions)"]
 
-    ## Within block effects: distance is number of sessions between (only same-block sessions)
+    ## Within block effects: distance is number of sessions between 
     for bb in range(B):
         for start_num, ss_start in enumerate(session_block_indexes[bb]):
             for end_num, ss_end in enumerate(session_block_indexes[bb]):
+                distance_in_same_block = end_num - start_num; # units: sessions
+                distance_all_sessions = ss_end - ss_start; # units: sessions
                 if(ss_start < ss_end or not sequential_between_session_same_block_distances):
                     rr_start = range(session_start_indexes[ss_start], session_start_indexes[ss_start+1])
                     rr_end   = range(session_start_indexes[ss_end  ], session_start_indexes[ss_end  +1])
-                    D[rr_start, rr_end, param_ctr] = ss_end - ss_start; #end_num - start_num;
+
+                    D[rr_start, rr_end, param_ctr] = distance_all_sessions if within_block_disance_in_total_sessions else distance_in_same_block;
         param_ctr += 1;
         param_names += ["within block - " + str(block_types[bb]) + " (units: sessions)"]
 
@@ -86,8 +88,8 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
             if(bb_start == bb_end):
                 continue;
 
-            for start_num, ss_start in enumerate(session_block_indexes[bb_start]):
-                for end_num, ss_end in enumerate(session_block_indexes[bb_end]):
+            for ss_start in session_block_indexes[bb_start]:
+                for ss_end in session_block_indexes[bb_end):
                     if(ss_start < ss_end or not sequential_between_session_different_block_distances):
                         rr_start = range(session_start_indexes[ss_start], session_start_indexes[ss_start+1])
                         rr_end   = range(session_start_indexes[ss_end  ], session_start_indexes[ss_end  +1])
