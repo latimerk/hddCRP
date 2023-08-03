@@ -374,7 +374,9 @@ class hddCRPModel():
     def _blank_connection_variables(self) -> None:
         '''
         Sets up the connection variable representations: ddCRP defines directed graph of node with outdegree fixed to 1.
-        May uses redundant representations for computationalconvenience. e.g., uses the fact that every component in the graph will contain one and only one cycle (cycle may just be a single node with a self connection)
+        May uses redundant representations for computationalconvenience. e.g., uses the fact that every component in the graph 
+            will contain one and only one cycle (cycle may just be a single node with a self connection).
+            The cycle will be contained within one layer
         Everything here will be blank and not valid!
 
         Assumes: valid properties: self.N, self.num_layers 
@@ -457,7 +459,7 @@ class hddCRPModel():
             # store connections as predecessors
             for ii in range(self.N):
                 if(cs[ii] != ii): # no self connections
-                    self._C_predecessors[layer][cs[ii]] += [ii];
+                    self._C_predecessors[layer][cs[ii]].append(ii);
 
 
     def _initialize_single_layer_of_connections(self, groups : tuple, YY : ArrayLike, alpha : float) -> tuple[ArrayLike,ArrayLike]:
@@ -898,6 +900,7 @@ class hddCRPModel():
         if(previous_node_to == node_to):
             return; # don't bother doing anything in this case: connection already set
 
+
         assert self._groupings_compact[node_from, layer] == self._groupings_compact[node_to, layer], "invalid connection between groups"
 
         table_num_from = self._C_tables[node_from,layer];
@@ -909,26 +912,70 @@ class hddCRPModel():
 
         is_cycle_from = self._C_is_cycle[node_from,layer];
 
+        is_connecting_to_predecessor = self._get_if_node_leads_to_destination_within_layer(node_to, node_from, layer) # needs to do before changing _C_ptr
+
+        # changes the ptr to the new node
+        self._C_ptr[node_from, layer] = node_to; 
+        # updates the predecessors
+        self._C_predecessors[layer][previous_node_to].remove(node_from)
+        self._C_predecessors[layer][node_to].append(node_from)
+
         if(table_num_from != table_num_to):
             if(is_cycle_from):
                 # combines tables completely
-                pass
+                table_num = min(table_num_from, table_num_to)
+                nodes = np.isin(self._C_tables,[table_num_from, table_num_to]);
+                nodes_from = self._C_tables == table_num_from;
+                Y_type = Y_type_from
+                if(Y_type == hddCRPModel.UNKNOWN_OBSERVATION):
+                    Y_type = Y_type_to;
+
+                # all in cycle from table_num_from are not in cycle
+                self._C_is_cycle[nodes_from[:,layer],layer] = False
+
+                # combine label counts
+                self._C_num_labeled_in_table[table_num] = self._C_num_labeled_in_table[table_num_from] + self._C_num_labeled_in_table[table_num_to]
+                # propogate _C_num_labeled_upstream through the old cycle to make valid
+                self._reset_C_num_labeled_upstream_from_node(previous_node_to, layer)
+
+                # re-number and label tables
+                self._C_tables[nodes] = table_num;
+                if(Y_type_to != Y_type_from):
+                    self._C_y[nodes] = Y_type;
+                    self._C_table_values[table_num] = Y_type;
+
+                # delete old table
+                table_num_for_deletion = max(table_num_from, table_num_to)
+                self._C_table_values = np.delete(self._C_table_values, table_num_for_deletion);
+                self._C_num_labeled_in_table = np.delete(self._C_num_labeled_in_table, table_num_for_deletion);
+                self._C_table_counter -= 1;
             else:
                 # keeps two tables
-                #       Start at node_c = previous_node_to
-                #       while not in cycle
-                #             self._C_num_labeled_upstream[node_c, layer_c] = sum(self._C_num_labeled_upstream[upstream nodes])
-                # propogates self._C_num_labeled_upstream[node, layer] through new table
-                # TODO: self._C_num_labeled_in_table[table_num_to] += self._C_num_labeled_upstream[node, layer]
-                #       self._C_num_labeled_in_table[table_num_from] -= self._C_num_labeled_upstream[node, layer]
+
+                # set label counts
+                self._C_num_labeled_in_table[table_num_to]   += self._C_num_labeled_upstream[node_from, layer]
+                self._C_num_labeled_in_table[table_num_from] -= self._C_num_labeled_upstream[node_from, layer]
+                # reset _C_num_labeled_upstream
+                self._reset_C_num_labeled_upstream_from_node(previous_node_to, layer);
+                self._reset_C_num_labeled_upstream_from_node(node_from, layer);
+
+                # If no labeled nodes in table_num_from, change to UNKNOWN
+                if(self._C_num_labeled_in_table[table_num_from] == 0):
+                    self._C_table_values[table_num_from] = hddCRPModel.UNKNOWN_OBSERVATION;
+                    self._C_y[self._C_tables == table_num_from] = hddCRPModel.UNKNOWN_OBSERVATION;
+
+                # If table_num_to had no labels, but does now, change to Y_type
+                if(Y_type_to == hddCRPModel.UNKNOWN_OBSERVATION and self._C_num_labeled_in_table[table_num_to] > 0):
+                    self._C_table_values[table_num_to] = Y_type_from;
+                    self._C_y[self._C_tables == table_num_to] = Y_type_from
+                
                 # relables preceeding nodes from node_from to table_num_to
-                #
-                # If self._C_num_labeled_in_table[table_num_from] == 0, change to UNKNOWN
-                # If self._C_num_labeled_in_table[table_num_to] was 0 and is now >= 0, change to Y_type
-                #
-                pass
+                self._propogate_label_backwards(node_from, layer, table_num_to)
+                    
         else:
             if(is_cycle_from):
+                # connecting within table case: not splitting, but changing the cycle
+
                 # relabel cycle: node_from must still be in cycle
                 self._C_is_cycle[self._C_tables == table_num_from] = False;
                 node_c = node_from;
@@ -937,40 +984,69 @@ class hddCRPModel():
                     self._C_is_cycle[node_c, layer_c] = True;
                     node_c, layer_c = self._get_next_node(node_c, layer_c);
 
-                # connecting within table case: not splitting, but changing the cycle
-                # TODO: how to recompute self._C_num_labeled_upstream[node, layer] in this case?
-                #       Start at node_c = previous_node_to
-                #       while not in cycle
-                #             self._C_num_labeled_upstream[node_c, layer_c] = sum(self._C_num_labeled_upstream[upstream nodes])
-                # TODO: self._C_num_labeled_in_table[table_num] is constant
-                pass
-            elif(self._get_if_node_leads_to_within_layer(node_to, node_from)):
+                # propogate _C_num_labeled_upstream through the old cycle to make valid
+                self._reset_C_num_labeled_upstream_from_node(previous_node_to, layer)
+                # self._C_num_labeled_in_table[table_num] is constant
+            elif(is_connecting_to_predecessor):
                 # SPLITS A TABLE  node belongs now to table_new, others belong to table_num
+                table_num_new = self._C_table_counter;
+                Y_new = hddCRPModel.UNKNOWN_OBSERVATION;
+                if(self._C_num_labeled_upstream[node_from, layer] > 0):
+                    Y_new = Y_type_from;
+
+                self._C_table_values = np.append(self._C_table_values,Y_new)
+                self._C_table_counter += 1;
+
                 # node is now in the cycle
                 node_c = node_from;
-                layer_c = layer;
+                layer_c = layer; # layer shouldn't change here
+                cycle_nodes = []
                 while(not self._C_is_cycle[node_c, layer_c]):
+                    cycle_nodes.append(node_c)
                     self._C_is_cycle[node_c, layer_c] = True;
+                    self._C_y[node_c, layer_c] = Y_new
                     node_c, layer_c = self._get_next_node(node_c, layer_c);
 
-                pass
-                # TODO: how to recompute self._C_num_labeled_upstream[node, layer] in this case?
-                #       Start at node_c = previous_node_to
-                #       while not in cycle
-                #             self._C_num_labeled_upstream[node_c, layer_c] -= self._C_num_labeled_upstream[node, layer]
-                # TODO: self._C_num_labeled_in_table[table_num_new] = self._C_num_labeled_upstream[node, layer]
-                #       self._C_num_labeled_in_table[table_num_old] -= self._C_num_labeled_upstream[node, layer]
+                # set all the table values for non-cycle nodes
+                for node_c in cycle_nodes:
+                    for pr_nodes in self._C_predecessors[layer][node_c]:
+                        if(not self._C_is_cycle[pr_nodes, layer]):
+                            self._propogate_label_backwards(pr_nodes, layer, table_num_new);
+
+                    if(layer < self.num_layers - 1 and self._C_ptr[node_c, layer+1] == node_c):
+                        self._propogate_label_backwards(node_c, layer+1, table_num_new)
+
+                # recompute self._C_num_labeled_upstream[node, layer] 
+                node_c = previous_node_to
+                layer_c = layer
+                while(not self._C_is_cycle[node_c, layer_c]):
+                    self._C_num_labeled_upstream[node_c, layer_c] -= self._C_num_labeled_upstream[node_from, layer]
+                    node_c, layer_c = self._get_next_node(node_c, layer_c);
+                # no need to change for anything in the new table: all non-cycle nodes must still have valid count
+
+                # split label counts
+                self._C_num_labeled_in_table[table_num_new]   = self._C_num_labeled_upstream[node_from, layer]
+                self._C_num_labeled_in_table[table_num_from] -= self._C_num_labeled_upstream[node_from, layer]
+                # if old table now has no nodes, unlabels it
+                if(Y_type_from != hddCRPModel.UNKNOWN_OBSERVATION and self._C_num_labeled_in_table[table_num_from] == 0):
+                    self._C_table_values[table_num_from] = hddCRPModel.UNKNOWN_OBSERVATION;
+                    self._C_y[self._C_tables == table_num_from] = hddCRPModel.UNKNOWN_OBSERVATION
             else:
-                pass
-                # reattach node to other part of table: doesn't change
-                # TODO: how to recompute self._C_num_labeled_upstream[node, layer] in this case?
-                #       Start at node_c = node_to
-                #       while not in cycle
-                #           self._C_num_labeled_upstream[node_to, layer] += self._C_num_labeled_upstream[node, layer]
-                #       Start at node_c = previous_node_to
-                #       while not in cycle
-                #             self._C_num_labeled_upstream[node_c, layer_c] = sum(self._C_num_labeled_upstream[upstream nodes])
-                # TODO: self._C_num_labeled_in_table[table_num] is constant
+                # reattach node to other part of table: doesn't change tables or cycle
+
+                # recompute self._C_num_labeled_upstream[node, layer] in this case
+                if(self._C_num_labeled_upstream[node_from, layer] > 0):
+                    node_c = node_to
+                    layer_c = layer
+                    while(not self._C_is_cycle[node_c, layer_c]):
+                        self._C_num_labeled_upstream[node_c, layer_c] += self._C_num_labeled_upstream[node_from, layer]
+                        node_c, layer_c = self._get_next_node(node_c, layer_c);
+                    node_c = previous_node_to
+                    layer_c = layer
+                    while(not self._C_is_cycle[node_c, layer_c]):
+                        self._C_num_labeled_upstream[node_c, layer_c] -= self._C_num_labeled_upstream[node_from, layer]
+                        node_c, layer_c = self._get_next_node(node_c, layer_c);
+                # self._C_num_labeled_in_table[table_num] is constant
 
         
     def _get_next_node(self, node : int, layer : int) -> tuple[int,int]:
@@ -992,7 +1068,6 @@ class hddCRPModel():
         else:
             layer_c = layer;
         return (node_c, layer_c);
-
 
 
     def _get_preceeding_nodes_within_layer(self, node, layer) -> list:
@@ -1042,3 +1117,28 @@ class hddCRPModel():
 
         return False;
         
+    def _reset_C_num_labeled_upstream_from_node(self, node_start, layer):
+        node_c = node_start;
+        while(not self._C_is_cycle[node_c,layer]):
+            if(layer < self.num_layers - 1 and self._C_ptr[node_c, layer+1] == node_c):
+                self._C_num_labeled_upstream[node_c,layer] = self._C_num_labeled_upstream[node_c,layer+1]
+            else:    
+                self._C_num_labeled_upstream[node_c,layer] = 0
+
+            for gg in self._C_predecessors[layer][node_c]:
+                self._C_num_labeled_upstream[node_c,layer] += self._C_num_labeled_upstream[gg,layer]
+            node_c, _ = self._get_next_node(node_c, layer);
+
+    def _propogate_label_backwards(self, node_from, layer, table_num_to):
+        assert not self._C_is_cycle[node_from, layer], "not intended for use with cycles"
+
+        nns = self._get_preceeding_nodes_within_layer(node_from, layer)
+
+        self._C_tables[nns, layer] = table_num_to
+        self._C_y[nns, layer] = self._C_table_values[table_num_to]
+
+        # any arrows from denser layers pointing to these nodes
+        if(layer < self.num_layers - 1):
+            for ii in nns:
+                if(self._C_ptr[ii, layer+1] == ii):
+                    self._propogate_label_backwards(ii, layer+1, table_num_to);

@@ -47,3 +47,4 @@ def simulate_markov_chain(initial_state_prob : ArrayLike, transition_matrix : Ar
 
 # TODO: Generate a hddCRP with specific alpha and distances
 #  Use to see how well we can recover distance parameter and alphas
+#  Sequential CRP: that way we can model time series data where the hierarchical groups depend on recent context (n-th order markov model)
