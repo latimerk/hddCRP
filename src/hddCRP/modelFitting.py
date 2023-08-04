@@ -7,9 +7,10 @@ from inspect import signature
 
 # special functions
 from scipy.special import softmax
-# from scipy.special import logsumexp
+from scipy.special import logsumexp
 
 import warnings
+
 
 class hddCRPModel():
     '''
@@ -277,9 +278,8 @@ class hddCRPModel():
         '''
         theta = np.array(theta,dtype=float).flatten();
         assert len(theta) == self.P, "parameters must be length (P)"
-        self._weight_params = np.array(theta,dtype=float);
-        self._F[:,:] = np.apply_along_axis(lambda rr : self._weight_func(rr, self._weight_params), 2, self._D)
-        np.fill_diagonal(self._F, 0);
+        self._weight_params = np.array(theta,dtype=float); 
+        self._F = self._compute_weights(self._weight_params)
         assert np.all(self._F >= 0), "invalid connection weights found! check the weight/distance function"
 
 
@@ -311,6 +311,13 @@ class hddCRPModel():
         BaseMeasure_new = np.array(BaseMeasure_new).flatten();
         assert len(BaseMeasure_new) == self.M, "BaseMeasure is incorrect length"
         self._BaseMeasure = BaseMeasure_new/np.sum(BaseMeasure_new);
+        
+    @property
+    def num_parameters(self) -> int:
+        '''
+        The number of parameters that we probably care about: the distance/weight function parameters and the alphas
+        '''
+        return self.alpha.size + self.weight_params.size
 
     '''
     ==========================================================================================================================================
@@ -879,6 +886,101 @@ class hddCRPModel():
 
         self._set_connection(node, layer, node_to)
 
+    '''
+    ==========================================================================================================================================
+    Methods for model fitting & evaluation
+    ==========================================================================================================================================
+    '''
+
+    def compute_log_likelihood(self, weight_params : ArrayLike = None, alphas : ArrayLike | float = None):
+        '''
+        Computes the log likelihood of the current connections between nodes (customers) in the model and observation values (table labels) given the parameters.
+        Assumes connection variables are all setup correctly - does not check! No values in object are modified.
+
+        Args:
+          weight_params: (array length P) The parameters for the distance/weight function. If none given, uses current values.
+          alphas: (array length num_layers or scalar) The level-up/self connection bias parameters. If scalar, uses the same value for all layers. If none given, uses current values.
+
+        Results:
+          log likelihood of the current connections and observation types (table labels)
+        '''
+
+
+        (log_P_cons, log_C) = self._compute_log_likelihood_connection(weight_params, alphas)
+        log_p_Y_given_cons  = self._compute_log_P_table_assignments()
+
+        return log_P_cons + log_p_Y_given_cons - log_C;
+
+
+    def _compute_log_likelihood_connection(self, alphas : float | ArrayLike  | None, weight_params : ArrayLike  | None) -> tuple[float,float]:
+        '''
+        Computes the log likelihood of the current connections between nodes (customers).
+        Assumes connection variables are all setup correctly - does not check! No values in object are modified.
+
+        Args:
+          weight_params: (array length P) The parameters for the distance/weight function. If none given, uses current values.
+          alphas: (array length num_layers or scalar) The level-up/self connection bias parameters. If scalar, uses the same value for all layers. If none given, uses current values.
+
+        Results:
+          (log likelihood of connections - unnormalized, log normalizing constant)
+        '''
+
+        # set up alphas
+        if(alphas is None):
+            alphas = self.alpha
+        else:
+            if(np.isscalar(alphas)):
+                alphas = np.ones((self.num_layers))*alphas;
+            else:
+                alphas = np.array(alphas).flatten()
+                assert alphas.size == self.alpha.size, "invalid size of alpha argument: must be scalar or array of length num_layers"
+
+        # get connection weights
+        if(weight_params is None): 
+            weights = self._F
+        else:
+            weight_params = np.array(weight_params);
+            assert weight_params.size == self._weight_params.size, "weight_params is not the correct size"
+            weights = self._compute_weights(weight_params);
+
+        # gets normalizing constants for connections
+        log_C = 0;
+        for layer in range(self.num_layers):
+            for gg in self._group_indicies[layer]:
+                log_C += np.sum(np.log(alphas[layer] + np.sum(weights[gg,gg],axis=1)[:,np.newaxis]))
+
+        # gets log likehood of picked weights
+        log_P_cons = 0;
+        for layer in range(self.num_layers):
+            w_c = weights[np.r_[range(self.N)], np.r_[self._C_ptr[:,layer]]];
+            w_c[self._C_ptr[:,layer] == range(self.N)] = alphas[layer];
+            log_P_cons += np.sum(np.log(w_c))
+
+        return (log_P_cons, log_C)
+
+    def _compute_log_P_table_assignments(self, LogBaseMeasure : ArrayLike = None) -> float:
+        '''
+        Computes the log likelihood of observed table values
+        Assumes connection variables are all setup correctly - does not check! No values in object are modified.
+
+        Args:
+          LogBaseMeasyre: (array length M) The log base probability of each observation value. If none given, uses current values.
+
+        Results:
+          log likelihood of the observations occuring at each table.
+        '''
+
+        # get connection weights
+        if(LogBaseMeasure is None): 
+            LogBaseMeasure = np.log(self.BaseMeasure)
+        else:
+            LogBaseMeasure = np.array(LogBaseMeasure).flatten()
+            assert LogBaseMeasure.size == self.M, "Base measure is not the correct size"
+            LogBaseMeasure -= logsumexp(LogBaseMeasure)
+
+        # gets log likelihood of table assignments
+        num_tables = np.array([np.sum(self._C_table_values == mm) for mm in range(self.M) ]);
+        return np.dot(LogBaseMeasure, num_tables);
 
     '''
     ==========================================================================================================================================
@@ -1117,7 +1219,15 @@ class hddCRPModel():
 
         return False;
         
-    def _reset_C_num_labeled_upstream_from_node(self, node_start, layer):
+    def _reset_C_num_labeled_upstream_from_node(self, node_start, layer) -> None:
+        '''
+        Resets the values of _C_num_labeled_upstream from one specific node, traversing the graph forwards until the cycle of the table has been reached.
+
+        Args:
+          node_start: int in range(self.N) the start point
+          layer: int in range(self.num_layers) which layer to begin in
+        '''
+
         node_c = node_start;
         while(not self._C_is_cycle[node_c,layer]):
             if(layer < self.num_layers - 1 and self._C_ptr[node_c, layer+1] == node_c):
@@ -1129,7 +1239,16 @@ class hddCRPModel():
                 self._C_num_labeled_upstream[node_c,layer] += self._C_num_labeled_upstream[gg,layer]
             node_c, _ = self._get_next_node(node_c, layer);
 
-    def _propogate_label_backwards(self, node_from, layer, table_num_to):
+    def _propogate_label_backwards(self, node_from, layer, table_num_to) -> None:
+        '''
+        Resets the values of _C_tables and _C_y from one specific node, traversing the graph backwards until all preceding nodes have been reached.
+        Changes the nodes to be at a new table. The _C_y values are taken from _C_table_values[table_num_to]
+
+        Args:
+          node_from: int in range(self.N) the start point
+          layer: int in range(self.num_layers) which layer to begin in
+          table_num_to: int in range(self._C_table_counter) the new table number for the nodes
+        '''
         assert not self._C_is_cycle[node_from, layer], "not intended for use with cycles"
 
         nns = self._get_preceeding_nodes_within_layer(node_from, layer)
@@ -1142,3 +1261,72 @@ class hddCRPModel():
             for ii in nns:
                 if(self._C_ptr[ii, layer+1] == ii):
                     self._propogate_label_backwards(ii, layer+1, table_num_to);
+
+    def _compute_weights(self, weights : ArrayLike) -> np.ndarray:
+        '''
+        Computes the unnormalized probability of connections between each node.
+
+        Args:
+          weights: (length P) the parameters for the given weight function.
+        Returns:
+          The weights for each connection given the weight parameters
+        '''
+        F = np.apply_along_axis(lambda rr : self._weight_func(rr, weights), 2, self._D)
+        np.fill_diagonal(F, 0);
+        return F;
+
+
+def Metropolis_Hastings_step_for_hddCRP_parameters(hddcrp : hddCRPModel, sigma2 : ArrayLike | float, log_prior_probability : Callable = None) -> tuple[hddCRPModel, float]:
+    '''
+    Takes a random-walk Metropolis-Hastings step for the hddCRP model parameters.
+    Here, I assume all parameters are positive. So, the sampling is in LOG space.
+
+    Args:
+        hddcrp: The model to sample from.
+        sigma2: (scalar, vector of length hddcrp.num_parameters, or matrix size hddcrp.num_parameters x hddcrp.num_parameters) The size of the MH proposal step in each dimension.
+               If scalar, covariance of step is EYE(num_parameters)*sigma
+               If vector, covariance of step diag(sigma)
+               If matrix, is the full covariance matrix
+    Returns:
+        (hddcrp, log_acceptance_probability, accepted)
+        hddcrp: The hddCRPModel object.
+        log_acceptance_probability: (float) the log acceptance probability in the MH step
+        accepted: (bool) whether or not the sample was accepted (hddcrp is changed if True)
+    Raises:
+        ValueError: if sigma2 is incorrect shape
+    '''
+    theta_current = np.concatenate([hddcrp.alpha.flatten(), hddcrp.weight_params.flatten()]);
+    weight_idx = range(hddcrp.alpha.size, hddcrp.weight_params.size + hddcrp.alpha.size)
+    alpha_idx = range(hddcrp.alpha.size)
+
+    log_theta_current = np.log(theta_current)
+    if(np.isscalar(sigma2)):
+        eps = np.random.normal(scale=np.sqrt(sigma2),size=theta_current.shape)
+    elif(np.size(sigma2) == np.size(theta_current)):
+        eps = np.random.normal(scale=np.sqrt(np.array(sigma2).flatten()))
+    elif(np.shape(sigma2) == (np.size(theta_current),)*2):
+        eps = np.random.multivariate_normal(np.zeros_like(theta_current), sigma2)
+    else:
+        raise ValueError("invalid variance for random-walk Metropolis-Hastings step")
+
+    log_theta_star = log_theta_current + eps;
+    theta_star = np.exp(log_theta_star)
+
+    log_p_Y_current = hddcrp.compute_log_likelihood()
+    log_p_Y_star = hddcrp.compute_log_likelihood(weight_params=theta_star[weight_idx], alphas=theta_star[alpha_idx])
+
+    log_P_theta_current = log_prior_probability(theta_current) + np.sum(log_theta_current)
+    log_P_theta_star    = log_prior_probability(theta_star) + np.sum(log_theta_star)
+
+    log_acceptance_probability = min(0.0, log_p_Y_star + log_P_theta_star - (log_p_Y_current + log_P_theta_current))
+
+    aa = -np.random.exponential()
+
+    if(aa > log_acceptance_probability):
+        accepted = True
+        hddcrp.alpha = theta_star[alpha_idx]
+        hddcrp.weight_params = theta_star[weight_idx]
+    else:
+        accepted = False
+
+    return (hddcrp, log_acceptance_probability, accepted)
