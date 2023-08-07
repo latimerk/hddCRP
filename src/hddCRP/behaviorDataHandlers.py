@@ -8,6 +8,8 @@ from hddCRP.modelFitting import hddCRPModel
 EMPTY_INDICATOR = "NULL"
 
 
+
+
 # TODO: Function to get tree of groups for time series of actions
 def create_context_tree_single_session(seq : ArrayLike, depth : int = 3, delim : str = "-") -> np.ndarray:
     depth = int(depth)
@@ -26,13 +28,16 @@ def create_context_tree_single_session(seq : ArrayLike, depth : int = 3, delim :
         seq[0] = EMPTY_INDICATOR
     grps = np.array(grps).T
     return grps
+def create_context_tree(seqs : list[ArrayLike], depth : int = 3, delim : str = "-") -> list[np.ndarray]:
+    return np.concatenate([create_context_tree_single_session(ss, depth=depth, delim=delim) for ss in seqs], axis=0)
 
 # TODO: Function to get distances from a set of time series actions (set of sessions)
 def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   distinct_within_session_distance_params : bool = False,
                                                                             sequential_within_session_distances : bool = False,
                                                                             sequential_between_session_same_block_distances : bool = False,
                                                                             sequential_between_session_different_block_distances : bool = True,
-                                                                            within_block_disance_in_total_sessions : bool = True):
+                                                                            within_block_distance_in_total_sessions : bool = True,
+                                                                            between_session_time_constants : ArrayLike = None, within_session_time_constant : float | ArrayLike = None):
     block_ids = np.array(block_ids).flatten()
     assert len(seqs) == len(block_ids), "number of sequences and block_ids must be the same (number of trials)"
 
@@ -52,15 +57,37 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
     param_ctr = 0;
     param_names = [];
 
+    if(not (between_session_time_constants is None or within_session_time_constant is None)):
+        between_session_time_constants = np.array(between_session_time_constants)
+        assert between_session_time_constants.shape == (B, B), "between_session_time_constants must be of size (B,B) where B = np.unique(block_ids).size"
+        assert np.all(between_session_time_constants > 0), "between_session_time_constants must be positive"
+
+        if(np.isscalar(within_session_time_constant)):
+            within_session_time_constant = np.ones((B))*within_session_time_constant
+        else:
+            within_session_time_constant = np.array(within_session_time_constant).flatten()
+        assert within_session_time_constant.size == B and np.all(within_session_time_constant > 0), "within_session_time_constant must be positive scalar or size (B) where B = np.unique(block_ids).size"
+
+        params = np.zeros((num_possible_parameters))
+        vectorize_parameters = True;
+    else:
+        vectorize_parameters = False;
+
     ## Within session effects: should be sequential or all?
     for bb in range(B):
         for ss in session_block_indexes[bb]:
-            rr = range(session_start_indexes[ss], session_start_indexes[ss+1])
-            L = np.ones((len(rr), len(rr)));
+            t_end = session_start_indexes[ss+1]
+            t_start = session_start_indexes[ss]
+            t = t_end - t_start;
+            r = np.arange(t,dtype=float)
+            L = r[:,np.newaxis] - r; #np. np.ones((t, t));
             if(sequential_within_session_distances):
-                L = np.tril(L);
+                # L = np.tril(L);
+                L[L < 0] = np.inf
 
-            D[rr,rr,param_ctr] = L
+            D[t_start:t_end,t_start:t_end,param_ctr] = L
+        if(vectorize_parameters):
+            params[param_ctr] = within_session_time_constant[bb]
         if(distinct_within_session_distance_params):
             param_ctr += 1;
             param_names += ["within session - " + str(block_types[bb]) + " (units: actions)"]
@@ -72,13 +99,17 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
     for bb in range(B):
         for start_num, ss_start in enumerate(session_block_indexes[bb]):
             for end_num, ss_end in enumerate(session_block_indexes[bb]):
-                distance_in_same_block = end_num - start_num; # units: sessions
-                distance_all_sessions = ss_end - ss_start; # units: sessions
-                if(ss_start < ss_end or not sequential_between_session_same_block_distances):
-                    rr_start = range(session_start_indexes[ss_start], session_start_indexes[ss_start+1])
-                    rr_end   = range(session_start_indexes[ss_end  ], session_start_indexes[ss_end  +1])
+                distance_in_same_block = start_num - end_num; # units: sessions
+                distance_all_sessions =  ss_start - ss_end; # units: sessions
+                if(ss_start > ss_end or not sequential_between_session_same_block_distances):
+                    t1_end = session_start_indexes[ss_start+1]
+                    t1_start = session_start_indexes[ss_start]
+                    t2_end = session_start_indexes[ss_end+1]
+                    t2_start = session_start_indexes[ss_end]
 
-                    D[rr_start, rr_end, param_ctr] = distance_all_sessions if within_block_disance_in_total_sessions else distance_in_same_block;
+                    D[t1_start:t1_end, t2_start:t2_end, param_ctr] = distance_all_sessions if within_block_distance_in_total_sessions else distance_in_same_block;
+        if(vectorize_parameters):
+            params[param_ctr] = between_session_time_constants[bb,bb]
         param_ctr += 1;
         param_names += ["within block - " + str(block_types[bb]) + " (units: sessions)"]
 
@@ -89,11 +120,15 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
                 continue;
 
             for ss_start in session_block_indexes[bb_start]:
-                for ss_end in session_block_indexes[bb_end):
-                    if(ss_start < ss_end or not sequential_between_session_different_block_distances):
-                        rr_start = range(session_start_indexes[ss_start], session_start_indexes[ss_start+1])
-                        rr_end   = range(session_start_indexes[ss_end  ], session_start_indexes[ss_end  +1])
-                        D[rr_start, rr_end, param_ctr] = ss_end - ss_start;
+                for ss_end in session_block_indexes[bb_end]:
+                    if(ss_start > ss_end or not sequential_between_session_different_block_distances):
+                        t1_end = session_start_indexes[ss_start+1]
+                        t1_start = session_start_indexes[ss_start]
+                        t2_end   = session_start_indexes[ss_end+1]
+                        t2_start = session_start_indexes[ss_end]
+                        D[t1_start:t1_end, t2_start:t2_end, param_ctr] = ss_start - ss_end;
+            if(vectorize_parameters):
+                params[param_ctr] = between_session_time_constants[bb_start,bb_end]
             param_ctr += 1;
             param_names += ["between block - " + str(block_types[bb_start]) + " to " + str(block_types[bb_end]) + " (units: sessions)"]
     
@@ -102,7 +137,11 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
     D = D[:,:,vv];
     param_names = np.array(param_names)[vv].tolist();
     
-    return (D, param_names)
+    if(vectorize_parameters):
+        params = params[vv]
+        return (D, param_names, params)
+    else:
+        return (D, param_names)
 
 
 # TODO: Function to take a set of sessions and return a hddCRPModel
@@ -110,7 +149,7 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
         weight_params_0 : float | ArrayLike = 1, weight_func : Callable = lambda x, y : np.exp(-np.sum(np.abs(x)/y)) ):
 
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
-    groupings = np.concatenate([create_context_tree_single_session(ss, depth=depth) for ss in seqs], axis=0)
+    groupings = create_context_tree(seqs, depth=depth)
     D, distance_labels = create_distance_matrix(seqs, block_ids)
 
 
