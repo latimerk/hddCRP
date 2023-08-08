@@ -444,7 +444,7 @@ class hddCRPModel():
         self._C_table_counter = 0; # number of tables in use
 
         self._C_num_labeled_in_table = np.zeros((0),dtype=int) # number of nodes with observations in each table (nodes in final layer that aren't UNKNOWN_OBSERVATION)
-        self._C_num_labeled_upstream = np.zeros((self.N, self.num_layers)) # number of observed nodes upstream of each node (inclusive of that node)
+        self._C_num_labeled_upstream = np.zeros((self.N, self.num_layers),dtype=int) # number of observed nodes upstream of each node (inclusive of that node)
 
         # creates Y for each layer
         # here, Y uses condensed observation indexes: should be 0,..,(M-1) plus any UNKNOWN_OBSERVATION values
@@ -953,6 +953,7 @@ class hddCRPModel():
         connection_type = self._set_connection(node, node_to, layer)
         if(DEBUG_MODE):
             self._validate_internals(connection_type)
+            print("Connection type: " + str(connection_type))
         return connection_type
 
     '''
@@ -1236,17 +1237,13 @@ class hddCRPModel():
                     cycle_nodes.append(node_c)
                     self._C_is_cycle[node_c, layer_c] = True;
                     self._C_y[node_c, layer_c] = Y_new
+                    self._C_tables[node_c, layer_c] = table_num_new
 
                     node_c, layer_c = self._get_next_node(node_c, layer_c);
 
                 # set all the table values for non-cycle nodes
                 for node_c in cycle_nodes:
-                    for pr_nodes in self._C_predecessors[layer][node_c]:
-                        if(not self._C_is_cycle[pr_nodes, layer]):
-                            self._propogate_label_backwards(pr_nodes, layer, table_num_new);
-
-                    if(layer < self.num_layers - 1 and self._C_ptr[node_c, layer+1] == node_c):
-                        self._propogate_label_backwards(node_c, layer+1, table_num_new)
+                    self._propogate_label_backwards(pr_nodes, layer, table_num_new);
 
 
                 # split label counts
@@ -1402,18 +1399,17 @@ class hddCRPModel():
           layer: int in range(self.num_layers) which layer to begin in
           table_num_to: int in range(self._C_table_counter) the new table number for the nodes
         '''
-        assert not self._C_is_cycle[node_from, layer], "not intended for use with cycles"
+        self._C_tables[node_from, layer] = table_num_to
+        self._C_y[node_from, layer] = self._C_table_values[table_num_to]
 
-        nns = self._get_preceeding_nodes_within_layer(node_from, layer)
-
-        self._C_tables[nns, layer] = table_num_to
-        self._C_y[nns, layer] = self._C_table_values[table_num_to]
+        nns = self._C_predecessors[layer][node_from]
+        for nn in nns:
+            if(not self._C_is_cycle[nn,layer]):
+                self._propogate_label_backwards(nn, layer, table_num_to);
 
         # any arrows from denser layers pointing to these nodes
-        if(layer < self.num_layers - 1):
-            for ii in nns:
-                if(self._C_ptr[ii, layer+1] == ii):
-                    self._propogate_label_backwards(ii, layer+1, table_num_to);
+        if(layer < self.num_layers - 1 and self._C_ptr[ii, layer+1] == ii):
+            self._propogate_label_backwards(ii, layer+1, table_num_to);
 
     def _compute_weights(self, weights : ArrayLike) -> np.ndarray:
         '''
@@ -1448,9 +1444,11 @@ class hddCRPModel():
         
         for layer in range(self.num_layers):
             for node in range(self.N):
-                if(not np.all(np.isin(C_predecessors[layer][node], self._C_predecessors[layer][node]))):
+                if(np.any(~np.isin(C_predecessors[layer][node], self._C_predecessors[layer][node]))):
+                    print(C_predecessors)
                     raise ValueError("_C_predecessors is missing nodes")
-                if(not np.all(np.isin(self._C_predecessors[layer][node], C_predecessors[layer][node]))):
+                if(np.any(~np.isin(self._C_predecessors[layer][node], C_predecessors[layer][node]))):
+                    print(C_predecessors)
                     raise ValueError("_C_predecessors has extra nodes")
 
     def _validate_labels(self) -> None:
@@ -1462,7 +1460,7 @@ class hddCRPModel():
         for ii, label in enumerate(self._C_table_values):
             tt = self._C_tables == ii
             found[tt] = True;
-            if(not np.all(self._C_y[tt] == label)):
+            if(np.any(self._C_y[tt] != label)):
                 raise ValueError("Invalid table labeling: table number " + str(ii))
         if(np.any(~found)):
             raise ValueError("Not all customers seated!")
@@ -1475,7 +1473,7 @@ class hddCRPModel():
                 node_to, layer_to = self._get_next_node(node, layer);
                 table_to = self._C_tables[node_to, layer_to];
                 if(table_from != table_to):
-                    raise ValueError("node " + str(node) + " in layer " + str(layer) + " points to a different table!")
+                    raise ValueError("node " + str(node) + " in layer " + str(layer) + " points to a different table at node = " + str(node_to) + " layer " + str(layer_to) + "!")
 
     def _validate_cycles(self) -> None:
         C_is_cycle = np.zeros((self.N, self.num_layers),dtype=bool)
@@ -1494,7 +1492,7 @@ class hddCRPModel():
             while(not C_is_cycle[node,layer]):
                 C_is_cycle[node,layer] = True;
                 node, layer = self._get_next_node(node, layer);
-        if(not np.all(C_is_cycle == self._C_is_cycle)):
+        if(np.any(C_is_cycle != self._C_is_cycle)):
             raise ValueError("_C_is_cycle is not valid")
     
     def _validate_counts(self) -> None:
@@ -1502,10 +1500,11 @@ class hddCRPModel():
             raise ValueError("_C_num_labeled_in_table is not correct size!")
 
         for ii, label in enumerate(self._C_table_values):
-            tt = self._C_tables == label
+            tt = self._C_tables == ii
             cnt = np.sum(self._C_y_0[tt] != hddCRPModel.UNKNOWN_OBSERVATION);
             if(cnt != self._C_num_labeled_in_table[ii]):
                 raise ValueError("_C_num_labeled_in_table has invalid count: table number " + str(ii))
+
 
 
         # trace all labeled nodes
@@ -1523,7 +1522,8 @@ class hddCRPModel():
                     node, layer = self._get_next_node(node, layer);
                 else:
                     break;
-        if(not np.all(C_num_labeled_upstream == self._C_num_labeled_upstream)):
+        if(np.any(C_num_labeled_upstream != self._C_num_labeled_upstream)):
+            print(C_num_labeled_upstream)
             raise ValueError("_C_num_labeled_upstream has invalid counts")
 
             
