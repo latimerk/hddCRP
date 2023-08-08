@@ -975,7 +975,7 @@ class hddCRPModel():
         connection_type = self._set_connection(node, node_to, layer)
         if(DEBUG_MODE):
             self._validate_internals(connection_type)
-            print("Connection type: " + str(connection_type))
+            # print("Connection type: " + str(connection_type))
         return connection_type
 
     '''
@@ -1148,11 +1148,15 @@ class hddCRPModel():
                 # combine label counts
                 self._C_num_labeled_in_table[table_num] = self._C_num_labeled_in_table[table_num_from] + self._C_num_labeled_in_table[table_num_to]
                 # propogate _C_num_labeled_upstream through the old cycle to make valid
-                pc = self._C_num_labeled_upstream[previous_node_to, previous_layer_to];
+                pc = self._C_num_labeled_upstream[previous_node_to, previous_layer_to]; # this quantity should be correct: propogate down now that [previous_node_to, previous_layer_to] is no longer in a cycle
                 node_c, layer_c = self._get_next_node(previous_node_to, previous_layer_to);
+                finished_with_old_cycle = (previous_node_to, previous_layer_to) == (node_from, layer);
                 while(True): # do while
                     self._C_num_labeled_upstream[node_c, layer_c] += pc;
-                    pc = self._C_num_labeled_upstream[node_c, layer_c];
+                    if(not finished_with_old_cycle):
+                        pc = self._C_num_labeled_upstream[node_c, layer_c]; 
+                        finished_with_old_cycle = (node_c, layer_c) == (node_from, layer);
+                        
                     if(not self._C_is_cycle[node_c, layer_c]): # while
                         node_c, layer_c = self._get_next_node(node_c, layer_c);
                     else:
@@ -1483,7 +1487,7 @@ class hddCRPModel():
                 print("CB_y \n" + str(self._CB_y.T))
                 print("C_table_values \n" + str(self._C_table_values))
                 print("C_tables \n" + str(self._C_tables.T))
-                print("C_y \n" + self._C_y.T)
+                print("C_y \n" + str(self._C_y.T))
                 raise ValueError("Invalid table labeling: table number " + str(ii))
         if(np.any(~found)):
             print("CB_tables \n" + str(self._CB_tables.T))
@@ -1504,7 +1508,7 @@ class hddCRPModel():
                     print("CB_ptr \n" + str(self._CB_ptr.T))
                     print("C_table_values \n" + str(self._C_table_values))
                     print("C_tables \n" + str(self._C_tables.T))
-                    print("C_y \n" + self._C_y.T)
+                    print("C_y \n" + str(self._C_y.T))
                     print("C_ptr \n" + str(self._C_ptr.T))
                     raise ValueError("node " + str(node) + " in layer " + str(layer) + " points to a different table at node = " + str(node_to) + " layer " + str(layer_to) + "!")
 
@@ -1534,7 +1538,7 @@ class hddCRPModel():
             print("CB_y \n" + str(self._CB_y.T))
             print("C_ptr \n" + str(self._C_ptr.T))
             print("C_tables \n" + str(self._C_tables.T))
-            print("C_y \n" + self._C_y.T)
+            print("C_y \n" + str(self._C_y.T))
             raise ValueError("_C_is_cycle is not valid")
     
     def _validate_counts(self) -> None:
@@ -1552,7 +1556,6 @@ class hddCRPModel():
         # trace all labeled nodes
         labeled_coords = np.argwhere(self._C_y_0 != hddCRPModel.UNKNOWN_OBSERVATION);
         C_num_labeled_upstream = np.zeros((self.N, self.num_layers),dtype=int)
-        C_num_labeled_upstream.fill(0)
         for pp in labeled_coords:
             node = pp[0];
             layer = pp[1];
@@ -1580,6 +1583,26 @@ class hddCRPModel():
         except ValueError as err:
             print("Error found with code: " + str(code))
             raise err
+        
+    def _validate_print_before_and_after(self):
+    
+        print("CB_tables_values \n" + str(self._CB_table_values))
+        print("CB_tables \n" + str(self._CB_tables.T))
+        print("CB_ptr \n" + str(self._CB_ptr.T))
+        print("CB_is_cycle \n" + str(self._CB_is_cycle.T))
+        print("CB_y \n" + str(self._CB_y.T))
+        print("CB_num_labeled_upstream \n" + str(self._CB_num_labeled_upstream.T))
+        print("CB_num_labeled_in_table \n" + str(self._CB_num_labeled_in_table))
+        print("CB_predecessors \n" + str(self._CB_predecessors))
+
+        print("C_table_values \n" + str(self._C_table_values))
+        print("C_tables \n" + str(self._C_tables.T))
+        print("C_ptr \n" + str(self._C_ptr.T))
+        print("C_is_cycle \n" + str(self._C_is_cycle.T))
+        print("C_y \n" + str(self._C_y.T))
+        print("C_num_labeled_upstream \n" + str(self._C_num_labeled_upstream.T))
+        print("C_num_labeled_in_table \n" + str(self._C_num_labeled_in_table))
+        print("C_predecessors \n" + str(self._C_predecessors))
 
 
 

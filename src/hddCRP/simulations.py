@@ -55,7 +55,7 @@ def make_graph_plot(connection_data, ax, hs=15,hh=5,ws=8, ww=4,num_sessions=None
     depth = connection_data['C_ptr'].shape[1]
     M = np.unique(connection_data['C_y']).size
     T = np.sum(connection_data['session_lengths'][:num_sessions])
-    G, pos = graph_connections(connection_data['session_lengths'][:num_sessions], connection_data['C_ptr'], hs=15,hh=2, ww=4,ws=8)
+    G, pos = graph_connections(connection_data['session_lengths'][:num_sessions], connection_data['C_ptr'], hs=hs,hh=hh, ww=4,ws=8)
     node_size = 30;
 
 
