@@ -253,7 +253,7 @@ def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, use_real_connec
         model._C_ptr[:,:] = C["C_ptr"]
         model._initialize_predecessors();
         model._initialize_table_labels();
-        model._initialize_table_label_counts();
         model._initialize_table_cycles();
+        model._initialize_table_label_counts();
 
     return model
