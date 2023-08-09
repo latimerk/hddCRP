@@ -1,4 +1,5 @@
 import numpy as np;
+from __future__ import annotations
 
 # for typing and validating arguments
 from numpy.typing import ArrayLike

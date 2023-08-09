@@ -1,6 +1,7 @@
 import numpy as np
 import networkx as nx
 from collections import defaultdict
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
