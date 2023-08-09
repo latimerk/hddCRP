@@ -4,6 +4,7 @@ channels:
 dependencies:
 - jupyter
 - jupyterlab
+- "notebook < 7.0"
 - matplotlib
 - "pandas < 2.0"
 - numpy
