@@ -1200,7 +1200,7 @@ class hddCRPModel():
         log_C = 0;
         for layer in range(self.num_layers):
             for gg in self._group_indicies[layer]:
-                log_C += np.sum(np.log(alphas[layer]*gg.size + np.sum(weights[gg,:][:,gg],axis=1)[:,np.newaxis]))
+                log_C += np.sum(np.log(alphas[layer] + np.sum(weights[gg,:][:,gg],axis=1)[:,np.newaxis]))
 
         # gets log likehood of picked weights
         log_P_cons = 0;

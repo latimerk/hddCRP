@@ -283,19 +283,19 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayL
 
     return (hddcrp, log_acceptance_probability, accepted)
 
-def sample_model_for_maze_data_with_fixed_MH_step(hddCRP : hddCRPModel, num_samples : int, sigma2 = 0.1**2):
+def sample_model_for_maze_data_with_fixed_MH_step(hddcrp : hddCRPModel, num_samples : int, sigma2 = 0.1**2):
     num_samples = int(num_samples)
     assert num_samples > 0, "must sample positive number of values"
     
     log_acceptance_probability = np.zeros((num_samples))
     accepted = np.zeros((num_samples),dtype=bool)
-    alphas = np.zeros((num_samples,hddCRP.alpha.size))
-    log_taus = np.zeros((num_samples,hddCRP.weight_params.size))
+    alphas = np.zeros((num_samples,hddcrp.alpha.size))
+    log_taus = np.zeros((num_samples,hddcrp.weight_params.size))
     for ss in range(num_samples):
-        hddCRP.run_gibbs_sweep()
-        hddCRP, log_acceptance_probability[ss], accepted[ss] = hddCRP.behaviorDataHandlers.Metropolis_Hastings_step_for_maze_data(hddCRP, sigma2)
+        hddcrp.run_gibbs_sweep()
+        hddcrp, log_acceptance_probability[ss], accepted[ss] = Metropolis_Hastings_step_for_maze_data(hddcrp, sigma2)
 
-        alphas[ss,:] = hddCRP.alpha
-        log_taus[ss,:] = hddCRP.weight_params
+        alphas[ss,:] = hddcrp.alpha
+        log_taus[ss,:] = hddcrp.weight_params
 
-    return (hddCRP, alphas, log_taus, log_acceptance_probability, accepted)
+    return (hddcrp, alphas, log_taus, log_acceptance_probability, accepted)
