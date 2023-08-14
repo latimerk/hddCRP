@@ -39,8 +39,8 @@ def complete_exponential_distance_function_for_maze_task(d, log_timescales, inds
 
           
 def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions,
-                            alpha_shape : float | ArrayLike = 3, alpha_scale : float | ArrayLike = 1000,
-                            timescale_between_scale : float | ArrayLike = 3, timescale_between_shape : float | ArrayLike = 1000,
+                            alpha_shape : float | ArrayLike = 3, alpha_scale : float | ArrayLike = 100,
+                            timescale_between_scale : float | ArrayLike = 3, timescale_between_shape : float | ArrayLike = 100,
                             timescale_within_shape  : float | ArrayLike = 3, timescale_within_scale  : float | ArrayLike = 100):
 
     if(np.all(alpha_scale==0) and np.all(alpha_shape=0)):
@@ -63,7 +63,7 @@ def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_times
 
     log_prior = log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_alphas.sum()
 
-    return log_prior
+    return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas
 
 
 # def exponential_distance_function_for_maze_task(f, weights, num_within_session_timescales : int = 1):

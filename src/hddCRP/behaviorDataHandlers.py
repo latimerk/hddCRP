@@ -267,14 +267,14 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayL
     log_p_Y_current = hddcrp.compute_log_likelihood()
     log_p_Y_star = hddcrp.compute_log_likelihood(alphas=np.exp(theta_star[alpha_idx]), weight_params=theta_star[weight_idx])
 
-    log_P_theta_current = log_prior_for_maze_task(theta_current[alpha_idx], theta_current[weight_idx[0]], theta_current[weight_idx[1:]]) 
-    log_P_theta_star    = log_prior_for_maze_task(theta_star[   alpha_idx], theta_star[   weight_idx[0]], theta_star[   weight_idx[1:]]) 
+    log_P_theta_current, *_ = log_prior_for_maze_task(theta_current[alpha_idx], theta_current[weight_idx[0]], theta_current[weight_idx[1:]]) 
+    log_P_theta_star, *_    = log_prior_for_maze_task(theta_star[   alpha_idx], theta_star[   weight_idx[0]], theta_star[   weight_idx[1:]]) 
 
     log_acceptance_probability = min(0.0, log_p_Y_star + log_P_theta_star - (log_p_Y_current + log_P_theta_current))
 
     aa = -np.random.exponential()
 
-    if(aa > log_acceptance_probability):
+    if(aa < log_acceptance_probability):
         accepted = True
         hddcrp.alpha = np.exp(theta_star[alpha_idx])
         hddcrp.weight_params = theta_star[weight_idx]
@@ -282,3 +282,20 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayL
         accepted = False
 
     return (hddcrp, log_acceptance_probability, accepted)
+
+def sample_model_for_maze_data_with_fixed_MH_step(hddCRP : hddCRPModel, num_samples : int, sigma2 = 0.1**2):
+    num_samples = int(num_samples)
+    assert num_samples > 0, "must sample positive number of values"
+    
+    log_acceptance_probability = np.zeros((num_samples))
+    accepted = np.zeros((num_samples),dtype=bool)
+    alphas = np.zeros((num_samples,hddCRP.alpha.size))
+    log_taus = np.zeros((num_samples,hddCRP.weight_params.size))
+    for ss in range(num_samples):
+        hddCRP.run_gibbs_sweep()
+        hddCRP, log_acceptance_probability[ss], accepted[ss] = hddCRP.behaviorDataHandlers.Metropolis_Hastings_step_for_maze_data(hddCRP, sigma2)
+
+        alphas[ss,:] = hddCRP.alpha
+        log_taus[ss,:] = hddCRP.weight_params
+
+    return (hddCRP, alphas, log_taus, log_acceptance_probability, accepted)
