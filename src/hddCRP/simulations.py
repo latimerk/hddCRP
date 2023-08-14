@@ -9,9 +9,9 @@ import matplotlib as mpl
 from numpy.typing import ArrayLike
 from typing import Callable
 
-from hddCRP.behaviorDataHandlers import create_distance_matrix
+from hddCRP.behaviorDataHandlers import create_distance_matrix, parameter_vectorizer_for_distance_matrix
 from hddCRP.behaviorDataHandlers import create_context_tree
-from hddCRP.modelFitting import exponential_distance_function, hddCRPModel
+from hddCRP.modelFitting import exponential_distance_function, exponential_distance_function_for_maze_task, hddCRPModel, complete_exponential_distance_function_for_maze_task
 
 def node_name(node, layer):
     return "l" + str(layer) + "_" + str(node);
@@ -132,7 +132,8 @@ def simulate_markov_chain(initial_state_prob : ArrayLike, transition_matrix : Ar
 #  Use to see how well we can recover distance parameter and alphas
 #  Sequential CRP: that way we can model time series data where the hierarchical groups depend on recent context (n-th order markov model)
 def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types : ArrayLike, symbols : ArrayLike | int,
-                               depth : int, alphas : ArrayLike | float, between_session_time_constants : ArrayLike, within_session_time_constant : float | ArrayLike = np.inf, 
+                               depth : int, alphas : ArrayLike | float, between_session_time_constants : ArrayLike, # between_session_scales : ArrayLike = 1,
+                               within_session_time_constant : float | ArrayLike = np.inf, 
                                base_measure : ArrayLike | None = None):
     session_types = np.array(session_types).flatten()
     num_sessions = session_types.size
@@ -167,6 +168,11 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
     assert between_session_time_constants.shape == (num_session_labels, num_session_labels), "between_session_time_constants must be of size (K,K) where K = np.unique(session_labels).size"
     assert np.all(between_session_time_constants > 0), "between_session_time_constants must be positive"
 
+    # if(np.isscalar(between_session_scales)):
+    #     between_session_scales = np.ones_like(between_session_time_constants) * between_session_scales;
+    # assert between_session_scales.shape == between_session_time_constants.shape, "between_session_scales must be a scalar or size (K,K) where K = np.unique(session_labels).size"
+    
+
     if(np.isscalar(within_session_time_constant)):
         distinct_within_session_distance_params = False
         within_session_time_constant = np.ones((num_session_labels))*within_session_time_constant
@@ -184,15 +190,27 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
 
     seqs = [np.zeros((tt),dtype=session_types.dtype) for tt in session_length];
 
-    D, param_names, time_constants = create_distance_matrix(seqs, session_types, distinct_within_session_distance_params = distinct_within_session_distance_params,
+    D, variable_names = create_distance_matrix(seqs, session_types, distinct_within_session_distance_params = distinct_within_session_distance_params,
                                                 sequential_within_session_distances = True,
                                                 sequential_between_session_same_block_distances = True,
                                                 sequential_between_session_different_block_distances = True,
-                                                within_block_distance_in_total_sessions  = True,
-                                                within_session_time_constant=within_session_time_constant,
-                                                between_session_time_constants=between_session_time_constants);
+                                                within_block_distance_in_total_sessions  = True);
+    
+    ## set up parameters in a specific vectorized form
+    param_names, params_vector, num_within_session_timeconstants = parameter_vectorizer_for_distance_matrix(variable_names, session_types, within_session_time_constant = within_session_time_constant, between_session_time_constants = between_session_time_constants)#, between_session_scales = between_session_scales)
 
-    F = np.apply_along_axis(lambda rr : exponential_distance_function(rr, time_constants), 2, D)
+
+    ##
+
+    log_params = np.log(params_vector);
+
+    # F = np.apply_along_axis(lambda rr : exponential_distance_function_for_maze_task(rr, log_params), 2, D)
+    D2 = np.min(D, axis=2)
+    inds = np.argmin(D, axis=2)
+    inds[np.isinf(D2)] = -1
+
+    F = complete_exponential_distance_function_for_maze_task(D2, log_params, inds)
+    
     np.fill_diagonal(F, 0);
 
     T_total = F.shape[0];
@@ -235,19 +253,32 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
             # store observation from final layer
             seqs[ss][tt] = symbols[C_y[tt_ctr, -1]]
             tt_ctr += 1
-    C = {'C_y' : C_y, 'F' : F, 'D' : D, 'C_ptr' : C_ptr, 'C_ctx' : C_ctx, 'session_lengths' : session_length, "symbols" : symbols, "alphas" : alphas, "base_measure" : base_measure, "time_constants" : time_constants, "time_constants_labels" : param_names}
+    C = {'C_y' : C_y, 'F' : F, 'D' : D, 'C_ptr' : C_ptr, 'C_ctx' : C_ctx, 
+         'session_lengths' : session_length, "symbols" : symbols, "alphas" : alphas, "base_measure" : base_measure, 
+         "param_vector" : params_vector, "param_names" : param_names, "variable_names" : variable_names, "num_within_session_timeconstants" : num_within_session_timeconstants}
     return (seqs, C)
 
 def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, use_real_connections=True):
     depth = C["alphas"].size
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
     groupings = create_context_tree(seqs, depth=depth)
+
+    D_0 = C["D"];
+    D = np.min(D_0, axis=2)
+    inds = np.argmin(D_0, axis=2)
+    inds[np.isinf(D)] = -1
+    weight_func = lambda xx,yy : exponential_distance_function_for_maze_task(xx,yy)
+    complete_weight_func = lambda d, log_timescales : complete_exponential_distance_function_for_maze_task(d, log_timescales, inds)
+
     model = hddCRPModel(Y, groupings,
                         C["alphas"],
-                        C["D"],
+                        D,
                         Y_values=C["symbols"],
                         BaseMeasure=C["base_measure"],
-                        weight_params=C["time_constants"], weight_func=exponential_distance_function, weight_param_labels=C["time_constants_labels"])
+                        weight_params=np.log(C["param_vector"]), 
+                        weight_func=None, 
+                        complete_weight_func=complete_weight_func, 
+                        weight_param_labels=C["variable_names"])
     if(use_real_connections):
         model._blank_connection_variables()
         model._C_ptr[:,:] = C["C_ptr"]
