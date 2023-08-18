@@ -278,9 +278,7 @@ def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, rng : np.random
         weight_params[0] = rng.normal(np.log(25), scale=1)
         weight_params[1:] = rng.normal(np.log(5), scale=1, size=(len(weight_params)-1))
 
-        alphas = np.zeros_like(C["alphas"])
-        for ii in range(len(alphas)):
-            alphas[ii] = rng.normal(np.log(10 * (1+ii)), scale=1)
+        alphas = np.exp(np.array([rng.normal(np.log(10 * (1+ii)), scale=1) for ii in range(depth)]))
 
     model = hddCRPModel(Y, groupings,
                         alphas,

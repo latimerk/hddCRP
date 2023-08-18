@@ -201,7 +201,7 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
     return (param_names, params_vector, num_within_session_timeconstants)
 
 # TODO: Function to take a set of sessions and return a hddCRPModel
-def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = 10,
+def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = None,
         weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None ):
 
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
@@ -220,7 +220,12 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
     if(not weight_params_0 is None):
         params_vector[:] = weight_params_0
     else:
-        params_vector = np.log(params_vector);
+        params_vector[0] = rng.normal(np.log(25), scale=1)
+        params_vector[1:] = rng.normal(np.log(5), scale=1, size=(len(params_vector)-1))
+
+    if(alpha_0 is None):
+        alpha_0 = np.exp(np.array([rng.normal(np.log(10 * (1+ii)), scale=1) for ii in range(depth)]))
+    
     weight_func = lambda xx,yy : exponential_distance_function_for_maze_task(xx, yy)
 
     D = np.min(D_0, axis=2)
