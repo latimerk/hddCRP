@@ -10,8 +10,111 @@ from inspect import signature
 # special functions
 from scipy.special import softmax
 from scipy.special import logsumexp
+from scipy.stats import invgamma
+from scipy.stats import norm
 
 import warnings
+
+
+def exponential_distance_function_for_maze_task(f, weights):
+    vv = np.isinf(f)
+    if(np.all(vv)):
+        return 0
+    else:
+        vv = ~vv
+        timescale = np.exp(weights[vv])
+        return np.prod(np.exp(-(np.abs(f[vv])/timescale)))
+    # vv = f[1]
+    # if(vv < 0):
+    #     return 0
+    # else:
+    #     timescale = np.exp(weights[vv])
+    #     return np.prod(np.exp(-(np.abs(f[vv])/timescale)))
+    
+def complete_exponential_distance_function_for_maze_task(d, log_timescales, inds):
+    timescales = np.exp(log_timescales)
+    d = d.squeeze()
+    F = np.zeros_like(d);
+    for ii in range(timescales.size):
+        F[inds == ii] = np.exp(-np.abs(d[inds == ii])/timescales[ii])
+    return F
+
+          
+def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions,
+                            alpha_shape : float | ArrayLike = 3, alpha_scale : float | ArrayLike = 100,
+                            timescale_between_scale : float | ArrayLike = 3, timescale_between_shape : float | ArrayLike = 100,
+                            timescale_within_shape  : float | ArrayLike = 3, timescale_within_scale  : float | ArrayLike = 100):
+
+    if(np.all(alpha_scale==0) and np.all(alpha_shape=0)):
+        log_p_alphas = np.zeros_like(log_alphas) 
+    else:
+        log_p_alphas = invgamma.logpdf(np.exp(log_alphas), alpha_shape, scale=alpha_scale)
+        log_p_alphas += log_alphas # for the exp/log transform
+
+    if(np.all(timescale_within_scale==0) and np.all(timescale_within_shape==0)):
+        log_p_timescales_within_session = np.zeros_like(log_timescales_within_session) 
+    else:
+        log_p_timescales_within_session = invgamma.logpdf(np.exp(log_timescales_within_session), timescale_within_shape, scale=timescale_within_scale)
+        log_p_timescales_within_session += log_timescales_within_session # for the exp/log transform
+        
+    if(np.all(timescale_between_scale==0) and np.all(timescale_between_shape==0)):
+        log_p_timescales_between_session = np.zeros_like(log_timescales_between_sessions) 
+    else:
+        log_p_timescales_between_session = invgamma.logpdf(np.exp(log_timescales_between_sessions), timescale_between_shape, scale=timescale_between_scale)
+        log_p_timescales_between_session += log_timescales_between_sessions # for the exp/log transform
+
+    log_prior = log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_alphas.sum()
+
+    return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas
+
+
+# def exponential_distance_function_for_maze_task(f, weights, num_within_session_timescales : int = 1):
+#     vv = np.isinf(f)
+#     if(np.all(vv)):
+#         return 0
+#     else:
+#         vv = np.where(~vv)[0][0];
+#         if(vv < num_within_session_timescales):
+#             # within session distance: single decay parameter
+#             timescale = np.exp(weights[vv])
+#             return np.prod(np.exp(-np.abs(f[vv])/timescale))
+#         else:
+#             # a between session distance: two parameters (decay timescale and offset)
+#             timescale = np.exp(weights[vv])
+#             log_mult = weights[2*vv - num_within_session_timescales]
+#             return np.prod(np.exp(-(np.abs(f[vv])/timescale) + log_mult))
+          
+# def log_prior_for_maze_task(alphas, timescales_within_session, timescales_between_sessions, log_mults,
+#                             alpha_shape : float | ArrayLike = 3, alpha_scale : float | ArrayLike = 1000,
+#                             timescale_between_scale : float | ArrayLike = 3, timescale_between_shape : float | ArrayLike = 1000,
+#                             timescale_within_shape  : float | ArrayLike = 3, timescale_within_scale  : float | ArrayLike = 1000,
+#                             log_mult_mean : float | ArrayLike = 0, log_mult_std : float | ArrayLike = 1):
+
+#     log_p_log_mults  = norm.logpdf(log_mults, loc=log_mult_mean, scale=log_mult_std)
+#     if(np.all(alpha_scale==0) and np.all(alpha_shape=0)):
+#         log_p_alphas = np.zeros_like(alphas) 
+#     else:
+#         log_p_alphas = invgamma.logpdf(np.exp(alphas), alpha_shape, scale=alpha_scale)
+#         log_p_alphas += alphas # for the exp/log transform
+
+#     if(np.all(timescale_within_scale==0) and np.all(timescale_within_shape==0)):
+#         log_p_timescales_within_session = np.zeros_like(timescales_within_session) 
+#     else:
+#         log_p_timescales_within_session = invgamma.logpdf(np.exp(timescales_within_session), timescale_within_shape, scale=timescale_within_scale)
+#         log_p_timescales_within_session += timescales_within_session # for the exp/log transform
+        
+#     if(np.all(timescale_between_scale==0) and np.all(timescale_between_shape==0)):
+#         log_p_timescales_between_session = np.zeros_like(timescales_between_sessions) 
+#     else:
+#         log_p_timescales_between_session = invgamma.logpdf(np.exp(timescales_between_sessions), timescale_between_shape, scale=timescale_between_scale)
+#         log_p_timescales_between_session += log_p_timescales_between_session # for the exp/log transform
+
+#     log_prior = log_p_log_mults.sum() + log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_alphas.sum()
+
+#     return log_prior
+
+
+
 
 def exponential_distance_function(f, weights):
     vv = np.isinf(f)
@@ -63,7 +166,8 @@ class hddCRPModel():
                        alpha : float | ArrayLike,
                        D : ArrayLike,
                        Y_values : ArrayLike = None, BaseMeasure : ArrayLike | None = None,
-                       weight_params : float | ArrayLike = 1, weight_func : Callable = lambda x, y : np.sum(np.greater(x,0)*y), weight_param_labels : list[str] = None) -> None:
+                       weight_params : float | ArrayLike = 1, weight_func : Callable = lambda x, y : np.sum(np.greater(x,0)*y), weight_param_labels : list[str] = None,
+                       complete_weight_func : Callable = None) -> None:
         """
         Sets up a hierarchical distance dependent Chinese restaurant process (hddCRP) model.
         This is a basic model that assumes the observations are from a discrete distribution and fully observed (not a mixture model,
@@ -83,6 +187,7 @@ class hddCRPModel():
           weight_params: (length P) The parameters for the distance-to-weight function
           weight_func: (length K array - distances, length P array - params) -> non-negative scalar
                        Function for taking a single distance between two observations into the weight for connection from one node to the next in the hddCRP.
+          complete_weight_func: (D -> N x N x K)
           weight_param_labels: (length P) List of names for each of the weight_params values
         
                 Example with only four observations:
@@ -196,11 +301,16 @@ class hddCRPModel():
         self._weights = np.zeros((self.N,self.N)); # the actual weights to be computed from the distances given the parameters and function
 
         # sets up the weighting function
-        assert isinstance(weight_func, Callable), "weight_func must be a function"
-        sig = signature(weight_func)
-        assert len(sig.parameters) == 2, "weight_func must take two parameters"
-        self._weight_func = weight_func;
-        assert self._weight_func(self._D[0,0,:], weight_params) >= 0, "weight function may not produce valid results" # tries running the weight function to make sure it works
+        if(not weight_func is None or complete_weight_func is None):
+            assert isinstance(weight_func, Callable), "weight_func must be a function"
+            sig = signature(weight_func)
+            assert len(sig.parameters) == 2, "weight_func must take two parameters"
+            self._weight_func = weight_func;
+            assert self._weight_func(self._D[0,0,:], weight_params) >= 0, "weight function may not produce valid results" # tries running the weight function to make sure it works
+
+        if(complete_weight_func is None):
+            complete_weight_func = lambda D, weights : np.apply_along_axis(lambda rr : self._weight_func(rr, weights), 2, D)
+        self._complete_weight_func = complete_weight_func;
 
         # sets up weighting function parameters: makes P, weight_params properties valid
         if(weight_params is None):
@@ -334,6 +444,7 @@ class hddCRPModel():
         The number of parameters that we probably care about: the distance/weight function parameters and the alphas
         '''
         return self.alpha.size + self.weight_params.size
+    
 
     '''
     ==========================================================================================================================================
@@ -859,16 +970,17 @@ class hddCRPModel():
                  By default, does all nodes in each layer from layer 0 to num_layers-1.
                  Within each layer, node order 0 to (N-1).
         Returns:
-          Set of internal debug codes for each gibbs step
+          tuple (codes, order)
+          codes: numpy array(int) (length order.shape[0]) Set of internal debug codes for each gibbs step
         '''
         if(order is None):
             order = np.concatenate((np.tile(np.arange(self.N),(self.num_layers))[:, np.newaxis],
                                     np.tile(np.arange(self.num_layers)[:,np.newaxis],(1,self.N)).flatten()[:,np.newaxis]), axis=1)
 
-        codes = np.zeros(order.shape, dtype=int)
+        codes = np.zeros((order.shape[0]), dtype=int)
         for ii in range(order.shape[0]):
-            codes[order[ii,0], order[ii,1]] = self._gibbs_sample_single_node(order[ii,0], order[ii,1], DEBUG_MODE=DEBUG_MODE);
-        return codes
+            codes[order[ii,0]] = self._gibbs_sample_single_node(order[ii,0], order[ii,1], DEBUG_MODE=DEBUG_MODE);
+        return (codes, order)
 
     def _post_for_single_nodes_connections(self, node : int, layer : int, print_msgs : bool = False ) -> tuple[list,np.ndarray]:
         '''
@@ -1035,7 +1147,7 @@ class hddCRPModel():
     ==========================================================================================================================================
     '''
 
-    def compute_log_likelihood(self, weight_params : ArrayLike = None, alphas : ArrayLike | float = None):
+    def compute_log_likelihood(self, alphas : ArrayLike | float = None, weight_params : ArrayLike = None):
         '''
         Computes the log likelihood of the current connections between nodes (customers) in the model and observation values (table labels) given the parameters.
         Assumes connection variables are all setup correctly - does not check! No values in object are modified.
@@ -1049,7 +1161,7 @@ class hddCRPModel():
         '''
 
 
-        (log_P_cons, log_C) = self._compute_log_likelihood_connection(weight_params, alphas)
+        (log_P_cons, log_C) = self._compute_log_likelihood_connection(weight_params=weight_params, alphas=alphas)
         log_p_Y_given_cons  = self._compute_log_P_table_assignments()
 
         return log_P_cons + log_p_Y_given_cons - log_C;
@@ -1492,7 +1604,7 @@ class hddCRPModel():
         Returns:
           The weights for each connection given the weight parameters
         '''
-        F = np.apply_along_axis(lambda rr : self._weight_func(rr, weights), 2, self._D)
+        F = self._complete_weight_func(self._D, weights) # mnp.apply_along_axis(lambda rr : self._weight_func(rr, weights), 2, self._D)
         np.fill_diagonal(F, 0);
         return F;
 
@@ -1663,8 +1775,6 @@ class hddCRPModel():
 
 
 
-
-
 def Metropolis_Hastings_step_for_hddCRP_parameters(hddcrp : hddCRPModel, sigma2 : ArrayLike | float, log_prior_probability : Callable = None) -> tuple[hddCRPModel, float]:
     '''
     Takes a random-walk Metropolis-Hastings step for the hddCRP model parameters.
@@ -1719,3 +1829,4 @@ def Metropolis_Hastings_step_for_hddCRP_parameters(hddcrp : hddCRPModel, sigma2 
         accepted = False
 
     return (hddcrp, log_acceptance_probability, accepted)
+

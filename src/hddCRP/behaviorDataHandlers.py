@@ -5,10 +5,11 @@ from typing import Callable
 
 
 from hddCRP.modelFitting import hddCRPModel
+from hddCRP.modelFitting import exponential_distance_function_for_maze_task, log_prior_for_maze_task, complete_exponential_distance_function_for_maze_task
 
 
 EMPTY_INDICATOR = "NULL"
-
+ALL_BLOCK_TYPES = "ALL_SESSIONS"
 
 
 
@@ -38,8 +39,7 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
                                                                             sequential_within_session_distances : bool = False,
                                                                             sequential_between_session_same_block_distances : bool = False,
                                                                             sequential_between_session_different_block_distances : bool = True,
-                                                                            within_block_distance_in_total_sessions : bool = True,
-                                                                            between_session_time_constants : ArrayLike = None, within_session_time_constant : float | ArrayLike = None):
+                                                                            within_block_distance_in_total_sessions : bool = True):
     block_ids = np.array(block_ids).flatten()
     assert len(seqs) == len(block_ids), "number of sequences and block_ids must be the same (number of trials)"
 
@@ -56,25 +56,9 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
     num_possible_parameters = (B ** 2) + (B if distinct_within_session_distance_params else 1);
     D = np.zeros((total_observations, total_observations, num_possible_parameters))
     D.fill(np.inf)
-    param_ctr = 0;
-    param_names = [];
-
-    if(not (between_session_time_constants is None or within_session_time_constant is None)):
-        between_session_time_constants = np.array(between_session_time_constants)
-        assert between_session_time_constants.shape == (B, B), "between_session_time_constants must be of size (B,B) where B = np.unique(block_ids).size"
-        assert np.all(between_session_time_constants > 0), "between_session_time_constants must be positive"
-
-        if(np.isscalar(within_session_time_constant)):
-            within_session_time_constant = np.ones((B))*within_session_time_constant
-        else:
-            within_session_time_constant = np.array(within_session_time_constant).flatten()
-        assert within_session_time_constant.size == B and np.all(within_session_time_constant > 0), "within_session_time_constant must be positive scalar or size (B) where B = np.unique(block_ids).size"
-
-        params = np.zeros((num_possible_parameters))
-        vectorize_parameters = True;
-    else:
-        vectorize_parameters = False;
-
+    variable_ctr = 0;
+    variable_names = [];
+    
     ## Within session effects: should be sequential or all?
     for bb in range(B):
         for ss in session_block_indexes[bb]:
@@ -87,15 +71,13 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
                 # L = np.tril(L);
                 L[L < 0] = np.inf
 
-            D[t_start:t_end,t_start:t_end,param_ctr] = L
-        if(vectorize_parameters):
-            params[param_ctr] = within_session_time_constant[bb]
+            D[t_start:t_end,t_start:t_end,variable_ctr] = L
         if(distinct_within_session_distance_params):
-            param_ctr += 1;
-            param_names += ["within session - " + str(block_types[bb]) + " (units: actions)"]
+            variable_ctr += 1;
+            variable_names += [{"scale" : "trial", "label" : block_types[bb]}]
     if(not distinct_within_session_distance_params):
-        param_ctr += 1;
-        param_names += ["within session - all (units: actions)"]
+        variable_ctr += 1;
+        variable_names += [{"scale" : "trial", "label" : ALL_BLOCK_TYPES}]
 
     ## Within block effects: distance is number of sessions between 
     for bb in range(B):
@@ -109,11 +91,9 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
                     t2_end = session_start_indexes[ss_end+1]
                     t2_start = session_start_indexes[ss_end]
 
-                    D[t1_start:t1_end, t2_start:t2_end, param_ctr] = distance_all_sessions if within_block_distance_in_total_sessions else distance_in_same_block;
-        if(vectorize_parameters):
-            params[param_ctr] = between_session_time_constants[bb,bb]
-        param_ctr += 1;
-        param_names += ["within block - " + str(block_types[bb]) + " (units: sessions)"]
+                    D[t1_start:t1_end, t2_start:t2_end, variable_ctr] = distance_all_sessions if within_block_distance_in_total_sessions else distance_in_same_block;
+        variable_ctr += 1;
+        variable_names += [{"scale" : "session", "from" : block_types[bb], "to" : block_types[bb]}]
 
 
     for bb_start in range(B):
@@ -128,32 +108,196 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
                         t1_start = session_start_indexes[ss_start]
                         t2_end   = session_start_indexes[ss_end+1]
                         t2_start = session_start_indexes[ss_end]
-                        D[t1_start:t1_end, t2_start:t2_end, param_ctr] = ss_start - ss_end;
-            if(vectorize_parameters):
-                params[param_ctr] = between_session_time_constants[bb_start,bb_end]
-            param_ctr += 1;
-            param_names += ["between block - " + str(block_types[bb_start]) + " to " + str(block_types[bb_end]) + " (units: sessions)"]
+                        D[t1_start:t1_end, t2_start:t2_end, variable_ctr] = ss_start - ss_end;
+            variable_ctr += 1;
+            variable_names += [{"scale" : "session", "from" : block_types[bb_start], "to" : block_types[bb_end]}]
     
     # remove unused params
     vv = [np.any(~np.isinf(D[:,:,xx])) for xx in range(D.shape[2])];
     D = D[:,:,vv];
-    param_names = np.array(param_names)[vv].tolist();
+    variable_names = np.array(variable_names)[vv].tolist();
     
-    if(vectorize_parameters):
-        params = params[vv]
-        return (D, param_names, params)
-    else:
-        return (D, param_names)
+    
+    return (D, variable_names)
 
+def parameter_vectorizer_for_distance_matrix(variable_names, session_types, within_session_time_constant = 10, between_session_time_constants = 50):#, between_session_scales = 1):
+    ## set up parameters in a specific vectorized form
+    within_session_vars  = [xx for xx in variable_names if xx["scale"] == "trial"];
+    between_session_vars = [xx for xx in variable_names if xx["scale"] == "session"];
+    # param_names = ["" for xx in range(len(within_session_vars) + len(between_session_vars)*2)];
+    param_names = ["" for xx in range(len(within_session_vars) + len(between_session_vars))];
+    params_vector = np.zeros((len(param_names)))
+
+    unique_session_types = np.unique(session_types);
+
+
+    for var in within_session_vars:
+        if(var["label"] == ALL_BLOCK_TYPES):
+            pos = 0;
+        else:
+            pos = np.where(unique_session_types == var["label"])[0][0];
+        param_names[pos] = var;
+        if(np.isscalar(within_session_time_constant)):
+            params_vector[pos] = within_session_time_constant
+        else:
+            params_vector[pos] = within_session_time_constant[pos]
+    
+    timescale_start = len(within_session_vars);
+    # scalar_start    = timescale_start + len(between_session_vars);
+
+    ctr = 0;
+    for from_label in unique_session_types:
+        pos_from = np.where(unique_session_types == from_label)[0][0];
+        pos_to = pos_from
+        # if within group exists
+        between_session_vars = [xx for xx in variable_names if xx["scale"] == "session" and xx["to"] == from_label and xx["from"] == from_label];
+        if(len(between_session_vars) > 0):
+            param_names[timescale_start + ctr] = between_session_vars[0];
+            param_names[timescale_start + ctr]["type"] = "timescale"
+            # param_names[scalar_start + ctr] = between_session_vars[0];
+            # param_names[scalar_start + ctr]["type"] = "scalar"
+
+            if(np.isscalar(between_session_time_constants)):
+                params_vector[timescale_start + ctr] = between_session_time_constants
+            else:
+                params_vector[timescale_start + ctr] = between_session_time_constants[pos_from,pos_to]
+
+            # if(np.isscalar(between_session_scales)):
+            #     params_vector[scalar_start + ctr]    = between_session_scales
+            # else:
+            #     params_vector[scalar_start + ctr]    = between_session_scales[pos_from,pos_to]
+
+
+            ctr += 1;
+
+    for from_label in unique_session_types:
+        pos_from = np.where(unique_session_types == from_label)[0][0];
+        for to_label in unique_session_types:
+            pos_to = np.where(unique_session_types == to_label)[0][0];
+
+            if(to_label == from_label):
+                continue;
+            
+            between_session_vars = [xx for xx in variable_names if xx["scale"] == "session" and xx["to"] == to_label and xx["from"] == from_label];
+            if(len(between_session_vars) > 0):
+                param_names[timescale_start + ctr] = between_session_vars[0];
+                param_names[timescale_start + ctr]["type"] = "timescale"
+                # param_names[scalar_start + ctr] = between_session_vars[0];
+                # param_names[scalar_start + ctr]["type"] = "scalar"
+                
+                if(np.isscalar(between_session_time_constants)):
+                    params_vector[timescale_start + ctr] = between_session_time_constants
+                else:
+                    params_vector[timescale_start + ctr] = between_session_time_constants[pos_from,pos_to]
+
+                # if(np.isscalar(between_session_scales)):
+                #     params_vector[scalar_start + ctr]    = between_session_scales
+                # else:
+                #     params_vector[scalar_start + ctr]    = between_session_scales[pos_from,pos_to]
+
+                ctr += 1;
+    num_within_session_timeconstants = len(within_session_vars)
+    return (param_names, params_vector, num_within_session_timeconstants)
 
 # TODO: Function to take a set of sessions and return a hddCRPModel
-def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = 1,
-        weight_params_0 : float | ArrayLike = 1, weight_func : Callable = lambda x, y : np.exp(-np.sum(np.abs(x)/y)) ):
+def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = 10,
+        weight_params_0 : float | ArrayLike = None ):
 
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
     groupings = create_context_tree(seqs, depth=depth)
-    D, distance_labels = create_distance_matrix(seqs, block_ids)
+    D_0, distance_labels = create_distance_matrix(seqs, block_ids,
+                                                distinct_within_session_distance_params = False,
+                                                sequential_within_session_distances = False,
+                                                sequential_between_session_same_block_distances = False,
+                                                sequential_between_session_different_block_distances = False,
+                                                within_block_distance_in_total_sessions  = True);
 
+    param_names, params_vector, num_within_session_timeconstants = parameter_vectorizer_for_distance_matrix(distance_labels, np.unique(block_ids))
+
+    assert num_within_session_timeconstants == 1, "setup error: wrong number of timescale parameters found"
+
+    if(not weight_params_0 is None):
+        params_vector[:] = weight_params_0
+    else:
+        params_vector = np.log(params_vector);
+    weight_func = lambda xx,yy : exponential_distance_function_for_maze_task(xx, yy)
+
+    D = np.min(D_0, axis=2)
+    inds = np.argmin(D_0, axis=2)
+    inds[np.isinf(D)] = -1
+
+    complete_weight_func = lambda d, log_timescales : complete_exponential_distance_function_for_maze_task(d, log_timescales, inds)
 
     return hddCRPModel(Y, groupings, alpha_0, D,
-                       weight_params=weight_params_0, weight_func=weight_func, weight_param_labels=distance_labels)
+                       weight_params=params_vector, weight_func=None, weight_param_labels=param_names, complete_weight_func=complete_weight_func)
+
+
+def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayLike | float) -> tuple[hddCRPModel, float]:
+    '''
+    Takes a random-walk Metropolis-Hastings step for the hddCRP model parameters.
+    Here, I assume all parameters can take any float value - the prior must do the transform for any constraints.
+
+    Args:
+        hddcrp: The model to sample from.
+        sigma2: (scalar, vector of length hddcrp.num_parameters, or matrix size hddcrp.num_parameters x hddcrp.num_parameters) The size of the MH proposal step in each dimension.
+               If scalar, covariance of step is EYE(num_parameters)*sigma
+               If vector, covariance of step diag(sigma)
+               If matrix, is the full covariance matrix
+    Returns:
+        (hddcrp, log_acceptance_probability, accepted)
+        hddcrp: The hddCRPModel object.
+        log_acceptance_probability: (float) the log acceptance probability in the MH step
+        accepted: (bool) whether or not the sample was accepted (hddcrp is changed if True)
+    Raises:
+        ValueError: if sigma2 is incorrect shape
+    '''
+    theta_current = np.concatenate([np.log(hddcrp.alpha.flatten()), hddcrp.weight_params.flatten()]);
+    weight_idx = range(hddcrp.alpha.size, hddcrp.weight_params.size + hddcrp.alpha.size)
+    alpha_idx = range(hddcrp.alpha.size)
+
+    if(np.isscalar(sigma2)):
+        eps = np.random.normal(scale=np.sqrt(sigma2),size=theta_current.shape)
+    elif(np.size(sigma2) == np.size(theta_current)):
+        eps = np.random.normal(scale=np.sqrt(np.array(sigma2).flatten()))
+    elif(np.shape(sigma2) == (np.size(theta_current),)*2):
+        eps = np.random.multivariate_normal(np.zeros_like(theta_current), sigma2)
+    else:
+        raise ValueError("invalid variance for random-walk Metropolis-Hastings step")
+
+    theta_star = theta_current + eps;
+
+    log_p_Y_current = hddcrp.compute_log_likelihood()
+    log_p_Y_star = hddcrp.compute_log_likelihood(alphas=np.exp(theta_star[alpha_idx]), weight_params=theta_star[weight_idx])
+
+    log_P_theta_current, *_ = log_prior_for_maze_task(theta_current[alpha_idx], theta_current[weight_idx[0]], theta_current[weight_idx[1:]]) 
+    log_P_theta_star, *_    = log_prior_for_maze_task(theta_star[   alpha_idx], theta_star[   weight_idx[0]], theta_star[   weight_idx[1:]]) 
+
+    log_acceptance_probability = min(0.0, log_p_Y_star + log_P_theta_star - (log_p_Y_current + log_P_theta_current))
+
+    aa = -np.random.exponential()
+
+    if(aa < log_acceptance_probability):
+        accepted = True
+        hddcrp.alpha = np.exp(theta_star[alpha_idx])
+        hddcrp.weight_params = theta_star[weight_idx]
+    else:
+        accepted = False
+
+    return (hddcrp, log_acceptance_probability, accepted)
+
+def sample_model_for_maze_data_with_fixed_MH_step(hddcrp : hddCRPModel, num_samples : int, sigma2 = 0.1**2):
+    num_samples = int(num_samples)
+    assert num_samples > 0, "must sample positive number of values"
+    
+    log_acceptance_probability = np.zeros((num_samples))
+    accepted = np.zeros((num_samples),dtype=bool)
+    alphas = np.zeros((num_samples,hddcrp.alpha.size))
+    log_taus = np.zeros((num_samples,hddcrp.weight_params.size))
+    for ss in range(num_samples):
+        hddcrp.run_gibbs_sweep()
+        hddcrp, log_acceptance_probability[ss], accepted[ss] = Metropolis_Hastings_step_for_maze_data(hddcrp, sigma2)
+
+        alphas[ss,:] = hddcrp.alpha
+        log_taus[ss,:] = hddcrp.weight_params
+
+    return (hddcrp, alphas, log_taus, log_acceptance_probability, accepted)
