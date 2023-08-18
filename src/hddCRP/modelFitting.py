@@ -1,4 +1,6 @@
+from __future__ import annotations
 import numpy as np;
+
 
 # for typing and validating arguments
 from numpy.typing import ArrayLike
@@ -1770,4 +1772,61 @@ class hddCRPModel():
         print("C_num_labeled_upstream \n" + str(self._C_num_labeled_upstream.T))
         print("C_num_labeled_in_table \n" + str(self._C_num_labeled_in_table))
         print("C_predecessors \n" + str(self._C_predecessors))
+
+
+
+def Metropolis_Hastings_step_for_hddCRP_parameters(hddcrp : hddCRPModel, sigma2 : ArrayLike | float, log_prior_probability : Callable = None) -> tuple[hddCRPModel, float]:
+    '''
+    Takes a random-walk Metropolis-Hastings step for the hddCRP model parameters.
+    Here, I assume all parameters are positive. So, the sampling is in LOG space.
+
+    Args:
+        hddcrp: The model to sample from.
+        sigma2: (scalar, vector of length hddcrp.num_parameters, or matrix size hddcrp.num_parameters x hddcrp.num_parameters) The size of the MH proposal step in each dimension.
+               If scalar, covariance of step is EYE(num_parameters)*sigma
+               If vector, covariance of step diag(sigma)
+               If matrix, is the full covariance matrix
+    Returns:
+        (hddcrp, log_acceptance_probability, accepted)
+        hddcrp: The hddCRPModel object.
+        log_acceptance_probability: (float) the log acceptance probability in the MH step
+        accepted: (bool) whether or not the sample was accepted (hddcrp is changed if True)
+    Raises:
+        ValueError: if sigma2 is incorrect shape
+    '''
+    theta_current = np.concatenate([hddcrp.alpha.flatten(), hddcrp.weight_params.flatten()]);
+    weight_idx = range(hddcrp.alpha.size, hddcrp.weight_params.size + hddcrp.alpha.size)
+    alpha_idx = range(hddcrp.alpha.size)
+
+    log_theta_current = np.log(theta_current)
+    if(np.isscalar(sigma2)):
+        eps = np.random.normal(scale=np.sqrt(sigma2),size=theta_current.shape)
+    elif(np.size(sigma2) == np.size(theta_current)):
+        eps = np.random.normal(scale=np.sqrt(np.array(sigma2).flatten()))
+    elif(np.shape(sigma2) == (np.size(theta_current),)*2):
+        eps = np.random.multivariate_normal(np.zeros_like(theta_current), sigma2)
+    else:
+        raise ValueError("invalid variance for random-walk Metropolis-Hastings step")
+
+    log_theta_star = log_theta_current + eps;
+    theta_star = np.exp(log_theta_star)
+
+    log_p_Y_current = hddcrp.compute_log_likelihood()
+    log_p_Y_star = hddcrp.compute_log_likelihood(weight_params=theta_star[weight_idx], alphas=theta_star[alpha_idx])
+
+    log_P_theta_current = log_prior_probability(theta_current) + np.sum(log_theta_current)
+    log_P_theta_star    = log_prior_probability(theta_star) + np.sum(log_theta_star)
+
+    log_acceptance_probability = min(0.0, log_p_Y_star + log_P_theta_star - (log_p_Y_current + log_P_theta_current))
+
+    aa = -np.random.exponential()
+
+    if(aa > log_acceptance_probability):
+        accepted = True
+        hddcrp.alpha = theta_star[alpha_idx]
+        hddcrp.weight_params = theta_star[weight_idx]
+    else:
+        accepted = False
+
+    return (hddcrp, log_acceptance_probability, accepted)
 
