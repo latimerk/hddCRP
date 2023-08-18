@@ -92,7 +92,7 @@ def make_graph_plot(connection_data, ax, hs=15,hh=5,ws=8, ww=4,num_sessions=None
 #       Use to ask how well an hddCRP can fit each session's variables as a function of the amount of data (and alpha and distance parameter) 
     # TODO: Generate sequence of X order markov chain matrices
     # TODO: Simulate a time series from an X order markov chain
-def simulate_markov_chain(initial_state_prob : ArrayLike, transition_matrix : ArrayLike, T : int) -> np.ndarray:
+def simulate_markov_chain(initial_state_prob : ArrayLike, transition_matrix : ArrayLike, T : int, rng : np.random.Generator) -> np.ndarray:
     initial_state_prob = np.array(initial_state_prob)
     if(initial_state_prob.ndim == 1):
         initial_state_prob = initial_state_prob[:,np.newaxis]
@@ -118,10 +118,10 @@ def simulate_markov_chain(initial_state_prob : ArrayLike, transition_matrix : Ar
 
     Y = np.zeros((T),dtype=int)
     for tt in range(order):
-        Y[tt] = np.random.choice(states, p=initial_state_prob[:,tt])
+        Y[tt] = rng.choice(states, p=initial_state_prob[:,tt])
     for tt in range(order,T):
         p = transition_matrix[np.s_[tuple(Y[tt-order:tt])], :].flatten();
-        Y[tt] = np.random.choice(states, p=p)
+        Y[tt] = rng.choice(states, p=p)
 
     return Y
 
@@ -132,7 +132,7 @@ def simulate_markov_chain(initial_state_prob : ArrayLike, transition_matrix : Ar
 #  Use to see how well we can recover distance parameter and alphas
 #  Sequential CRP: that way we can model time series data where the hierarchical groups depend on recent context (n-th order markov model)
 def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types : ArrayLike, symbols : ArrayLike | int,
-                               depth : int, alphas : ArrayLike | float, between_session_time_constants : ArrayLike, # between_session_scales : ArrayLike = 1,
+                               depth : int, rng : np.random.Generator, alphas : ArrayLike | float, between_session_time_constants : ArrayLike, # between_session_scales : ArrayLike = 1,
                                within_session_time_constant : float | ArrayLike = np.inf, 
                                base_measure : ArrayLike | None = None):
     session_types = np.array(session_types).flatten()
@@ -188,7 +188,7 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
     base_measure = base_measure / np.sum(base_measure)
     assert np.all(base_measure > 0) and base_measure.size == M, "base_measure must be positive array of length M = {symbols.size if symbols is Array, or symbols if symbols is scalar int}"
 
-    seqs = [np.zeros((tt),dtype=session_types.dtype) for tt in session_length];
+    seqs = [np.zeros((tt),dtype=symbols.dtype) for tt in session_length];
 
     D, variable_names = create_distance_matrix(seqs, session_types, distinct_within_session_distance_params = distinct_within_session_distance_params,
                                                 sequential_within_session_distances = True,
@@ -240,7 +240,7 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
                 wts[nodes_with_same_context == tt_ctr] = alphas[dd];
                 wts = wts/np.sum(wts)
 
-                C_ptr[tt_ctr, dd] = np.random.choice(nodes_with_same_context, p=wts);
+                C_ptr[tt_ctr, dd] = rng.choice(nodes_with_same_context, p=wts);
 
                 # set Y to connected node's Y
                 if(C_ptr[tt_ctr, dd] != tt_ctr):
@@ -249,7 +249,7 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
                     C_y[tt_ctr, dd] = C_y[tt_ctr, dd-1]
                 else:
                     # if self connect: then draw Y from base measure
-                    C_y[tt_ctr, dd] = np.random.choice(M, p=base_measure)
+                    C_y[tt_ctr, dd] = rng.choice(M, p=base_measure)
             # store observation from final layer
             seqs[ss][tt] = symbols[C_y[tt_ctr, -1]]
             tt_ctr += 1
@@ -258,7 +258,7 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
          "param_vector" : params_vector, "param_names" : param_names, "variable_names" : variable_names, "num_within_session_timeconstants" : num_within_session_timeconstants}
     return (seqs, C)
 
-def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, use_real_connections=True):
+def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, rng : np.random.Generator = None, use_real_connections=True):
     depth = C["alphas"].size
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
     groupings = create_context_tree(seqs, depth=depth)
@@ -270,15 +270,28 @@ def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, use_real_connec
     weight_func = lambda xx,yy : exponential_distance_function_for_maze_task(xx,yy)
     complete_weight_func = lambda d, log_timescales : complete_exponential_distance_function_for_maze_task(d, log_timescales, inds)
 
+    if(use_real_connections):
+        weight_params = np.log(C["param_vector"])
+        alphas = C["alphas"]
+    else:
+        weight_params = np.zeros_like(C["param_vector"])
+        weight_params[0] = rng.normal(np.log(25), scale=1)
+        weight_params[1:] = rng.normal(np.log(5), scale=1, size=(len(weight_params)-1))
+
+        alphas = np.zeros_like(C["alphas"])
+        for ii in range(len(alphas)):
+            alphas[ii] = rng.normal(np.log(10 * (1+ii)), scale=1)
+
     model = hddCRPModel(Y, groupings,
-                        C["alphas"],
+                        alphas,
                         D,
+                        rng=rng,
                         Y_values=C["symbols"],
                         BaseMeasure=C["base_measure"],
-                        weight_params=np.log(C["param_vector"]), 
+                        weight_params=weight_params, 
                         weight_func=None, 
                         complete_weight_func=complete_weight_func, 
-                        weight_param_labels=C["variable_names"])
+                        weight_param_labels=C["param_names"])
     if(use_real_connections):
         model._blank_connection_variables()
         model._C_ptr[:,:] = C["C_ptr"]
