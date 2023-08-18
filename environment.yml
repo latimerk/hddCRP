@@ -1,0 +1,17 @@
+name: hddCRP
+channels:
+- conda-forge
+dependencies:
+- jupyter
+- jupyterlab
+- "notebook < 7.0"
+- matplotlib
+- "pandas < 2.0"
+- numpy
+- scipy >=1.8.0
+- "python = 3.9"
+- setuptools
+- pip
+- pathlib
+- openpyxl
+- networkx

@@ -1,6 +1,8 @@
+from __future__ import annotations
 import numpy as np
 from numpy.typing import ArrayLike
 from typing import Callable
+
 
 from hddCRP.modelFitting import hddCRPModel
 from hddCRP.modelFitting import DualAveragingForStepSize
