@@ -11,6 +11,7 @@ from inspect import signature
 from scipy.special import softmax
 from scipy.special import logsumexp
 from scipy.stats import invgamma
+from scipy.stats import t as t_dist
 from scipy.stats import norm
 
 import warnings
@@ -39,33 +40,47 @@ def complete_exponential_distance_function_for_maze_task(d, log_timescales, inds
         F[inds == ii] = np.exp(-np.abs(d[inds == ii])/timescales[ii])
     return F
 
-          
 def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions,
-                            alpha_shape : float | ArrayLike = 3, alpha_scale : float | ArrayLike = 100,
-                            timescale_between_scale : float | ArrayLike = 3, timescale_between_shape : float | ArrayLike = 100,
-                            timescale_within_shape  : float | ArrayLike = 3, timescale_within_scale  : float | ArrayLike = 100):
+                            alpha_loc : float | ArrayLike = np.log(25), alpha_df = 4, alpha_scale : float | ArrayLike = 1,
+                            timescale_within_loc  : float | ArrayLike = np.log(25), timescale_within_df = 4, timescale_within_scale  : float | ArrayLike = 1,
+                            timescale_between_loc : float | ArrayLike = np.log(5), timescale_between_df = 4, timescale_between_scale : float | ArrayLike = 1):
 
-    if(np.all(alpha_scale==0) and np.all(alpha_shape=0)):
-        log_p_alphas = np.zeros_like(log_alphas) 
-    else:
-        log_p_alphas = invgamma.logpdf(np.exp(log_alphas), alpha_shape, scale=alpha_scale)
-        log_p_alphas += log_alphas # for the exp/log transform
+    log_p_alphas = t_dist.logpdf(log_alphas, loc=alpha_loc, df=alpha_df, scale=alpha_scale)
 
-    if(np.all(timescale_within_scale==0) and np.all(timescale_within_shape==0)):
-        log_p_timescales_within_session = np.zeros_like(log_timescales_within_session) 
-    else:
-        log_p_timescales_within_session = invgamma.logpdf(np.exp(log_timescales_within_session), timescale_within_shape, scale=timescale_within_scale)
-        log_p_timescales_within_session += log_timescales_within_session # for the exp/log transform
+    log_p_timescales_within_session = t_dist.logpdf(log_timescales_within_session, loc=timescale_within_loc, df=timescale_within_df , scale=timescale_within_scale)
         
-    if(np.all(timescale_between_scale==0) and np.all(timescale_between_shape==0)):
-        log_p_timescales_between_session = np.zeros_like(log_timescales_between_sessions) 
-    else:
-        log_p_timescales_between_session = invgamma.logpdf(np.exp(log_timescales_between_sessions), timescale_between_shape, scale=timescale_between_scale)
-        log_p_timescales_between_session += log_timescales_between_sessions # for the exp/log transform
+    log_p_timescales_between_session = t_dist.logpdf(log_timescales_between_sessions, loc=timescale_between_loc, df=timescale_between_df, scale=timescale_between_scale)
 
     log_prior = log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_alphas.sum()
 
     return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas
+          
+# def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions,
+#                             alpha_shape : float | ArrayLike = 3, alpha_scale : float | ArrayLike = 100,
+#                             timescale_within_shape  : float | ArrayLike = 3, timescale_within_scale  : float | ArrayLike = 100,
+#                             timescale_between_shape : float | ArrayLike = 3, timescale_between_scale : float | ArrayLike = 10):
+
+#     if(np.all(alpha_scale==0) and np.all(alpha_shape=0)):
+#         log_p_alphas = np.zeros_like(log_alphas) 
+#     else:
+#         log_p_alphas = invgamma.logpdf(np.exp(log_alphas), alpha_shape, scale=alpha_scale)
+#         log_p_alphas += log_alphas # for the exp/log transform
+
+#     if(np.all(timescale_within_scale==0) and np.all(timescale_within_shape==0)):
+#         log_p_timescales_within_session = np.zeros_like(log_timescales_within_session) 
+#     else:
+#         log_p_timescales_within_session = invgamma.logpdf(np.exp(log_timescales_within_session), timescale_within_shape, scale=timescale_within_scale)
+#         log_p_timescales_within_session += log_timescales_within_session # for the exp/log transform
+        
+#     if(np.all(timescale_between_scale==0) and np.all(timescale_between_shape==0)):
+#         log_p_timescales_between_session = np.zeros_like(log_timescales_between_sessions) 
+#     else:
+#         log_p_timescales_between_session = invgamma.logpdf(np.exp(log_timescales_between_sessions), timescale_between_shape, scale=timescale_between_scale)
+#         log_p_timescales_between_session += log_timescales_between_sessions # for the exp/log transform
+
+#     log_prior = log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_alphas.sum()
+
+#     return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas
 
 
 # def exponential_distance_function_for_maze_task(f, weights, num_within_session_timescales : int = 1):
@@ -167,7 +182,7 @@ class hddCRPModel():
                        D : ArrayLike,
                        Y_values : ArrayLike = None, BaseMeasure : ArrayLike | None = None,
                        weight_params : float | ArrayLike = 1, weight_func : Callable = lambda x, y : np.sum(np.greater(x,0)*y), weight_param_labels : list[str] = None,
-                       complete_weight_func : Callable = None) -> None:
+                       complete_weight_func : Callable = None, rng : np.random.Generator = None) -> None:
         """
         Sets up a hierarchical distance dependent Chinese restaurant process (hddCRP) model.
         This is a basic model that assumes the observations are from a discrete distribution and fully observed (not a mixture model,
@@ -189,6 +204,7 @@ class hddCRPModel():
                        Function for taking a single distance between two observations into the weight for connection from one node to the next in the hddCRP.
           complete_weight_func: (D -> N x N x K)
           weight_param_labels: (length P) List of names for each of the weight_params values
+          rng : random number generator to use - is np.random.default_rng() by default
         
                 Example with only four observations:
                  Y = [0, 1, 1, 0]
@@ -216,6 +232,9 @@ class hddCRPModel():
                  weight_params = []
                  defines a sequentual CRP that weights everything like a normal CRP
         """
+        if(rng is None):
+            rng = np.random.default_rng()
+        self._rng = rng;
 
         # sets _Y to a vector of ints. All negative numbers and nans are changed to a single index of UNKNOWN_OBSERVATION
         # makes the N property valid
@@ -329,6 +348,7 @@ class hddCRPModel():
             self.generate_random_connection_state();
         else:
             self.simulate_from_hddCRP();
+    
     
         # check to make sure everything is happy
         # self._validate_internals("INITIAL SETUP TEST")
@@ -466,9 +486,12 @@ class hddCRPModel():
     ==========================================================================================================================================
     '''
 
-    def simulate_from_hddCRP(self) -> None:
+    def simulate_from_hddCRP(self, rng : np.random.Generator = None) -> None:
         '''
         Generates a simulation from the hddCRP
+
+        Args:
+            rng: random number generator. Is self._rng by default
 
         Result:
           Y complete overridden with new observations
@@ -480,28 +503,31 @@ class hddCRPModel():
         self._Y_unknowns = np.where(self._Y == np.nan)[0];
         self._Y_indicies = [np.where(self._Y == xx)[0] for xx in self._Y_values];
 
-        self._initialize_connections(); # with everything set to unknown, this will just generate connections from the hddCRP
+        self._initialize_connections(rng=rng); # with everything set to unknown, this will just generate connections from the hddCRP
         self._initialize_predecessors();
 
         self._initialize_table_labels();
         self._initialize_table_cycles();
-        self._initialize_redraw_observations();
+        self._initialize_redraw_observations(rng=rng);
 
         # now sets these up properly
         self._Y_unknowns = np.where(self._Y == np.nan)[0];
         self._Y_indicies = [np.where(self._Y == xx)[0] for xx in self._Y_values];
 
 
-    def generate_random_connection_state(self, DEBUG_STEPS : bool = False) -> None:
+    def generate_random_connection_state(self, rng : np.random.Generator = None, DEBUG_STEPS : bool = False) -> None:
         '''
         Generates internal variables for all of the connection/table information.
         The connections between nodes in the hddCRP are generated stochastically (they are unobserved and this assumes we'll do Gibbs sampling later)
         Uses current np.random state
 
         This sets up all internal variables that start with _C_
+
+        Args:
+            rng: random number generator. Is self._rng by default
         '''
         # label the tables
-        self._initialize_connections();
+        self._initialize_connections(rng=rng);
         self._initialize_predecessors();
         
         if(DEBUG_STEPS):
@@ -580,10 +606,12 @@ class hddCRPModel():
         self._CB_num_labeled_in_table = self._C_num_labeled_in_table.copy()
         self._CB_num_labeled_upstream = self._C_num_labeled_upstream.copy()
 
-    def _initialize_connections(self) -> None:
+    def _initialize_connections(self, rng : np.random.Generator = None) -> None:
         '''
         Generates the connections between nodes. Does not set up tables.
-        Uses current np.random state
+
+        Args:
+            rng: random number generator. Is self._rng by default
 
         Assumes: valid properties: self.N, self.num_layers, alpha,
                  also setup by constructor: _Y_indicies, _group_indicies, _F
@@ -612,7 +640,7 @@ class hddCRPModel():
         # Connections generated from lowest-depth first (where observations are)
         self._C_y = self._C_y_0.copy()
         for layer in range(self.num_layers-1, -1, -1): # for each group
-            cs, YY_current, YY_upper = self._initialize_single_layer_of_connections(self._group_indicies[layer], self._C_y[:,layer], self.alpha[layer]);
+            cs, YY_current, YY_upper = self._initialize_single_layer_of_connections(self._group_indicies[layer], self._C_y[:,layer], self.alpha[layer], rng=rng);
             if(layer > 0):
                 self._C_y[:,layer - 1] = YY_upper;
             self._C_y[:, layer] = YY_current;
@@ -622,7 +650,6 @@ class hddCRPModel():
     def _initialize_predecessors(self):
         '''
         Generates the connections between nodes. Does not set up tables.
-        Uses current np.random state
 
         Assumes: valid properties: self.N, self.num_layers
                     _C_ptr: (int array size N x num_layers) _C_ptr[n,l] is connection value (node number) that node n in layer l connects to 
@@ -650,10 +677,9 @@ class hddCRPModel():
                     self._C_predecessors[layer][node_to].append(node_from);
 
 
-    def _initialize_single_layer_of_connections(self, groups : tuple, YY : ArrayLike, alpha : float) -> tuple[ArrayLike,ArrayLike]:
+    def _initialize_single_layer_of_connections(self, groups : tuple, YY : ArrayLike, alpha : float, rng : np.random.Generator = None) -> tuple[ArrayLike,ArrayLike]:
         '''
         Generates connections within a single layer
-        Uses current np.random state
 
         Assumes: valid properties: self.N
                  also setup by constructor: _F
@@ -664,6 +690,7 @@ class hddCRPModel():
           YY: (length N) the labels of the node in the current layer. Can contain UNKNOWN_OBSERVATION values. With pass-by-reference in numpy,
               UNKNOWN_OBSERVATION values may be replaced if nodes are connected to labeled nodes.
           alpha: the self connection weight for the layer
+          rng: The random number generator to use. Default value is self._rng
 
         Returns:
           (connections, YY, YY_upper): int arrays each of length N.
@@ -671,6 +698,8 @@ class hddCRPModel():
                                    YY: known labels in current layer updated
                                    YY_upper: known labels to propogate to layer above
         '''
+        if(rng is None):
+            rng = self._rng;
         YY_upper = np.ones((self.N),dtype=int)
         YY_upper.fill(hddCRPModel.UNKNOWN_OBSERVATION)
         connections = np.ones((self.N),dtype=int)
@@ -697,7 +726,7 @@ class hddCRPModel():
                 ps = ps/ps.sum()
 
                 #generate a connection
-                connections[node] = can_connect_to[np.random.choice(can_connect_to.size, p=ps)];
+                connections[node] = can_connect_to[rng.choice(can_connect_to.size, p=ps)];
                 # print("picked " + str(connections[node]))
 
                 # if connecting to unlabeled node and is labeled, adds label
@@ -879,23 +908,27 @@ class hddCRPModel():
                 
                 
 
-    def _initialize_redraw_observations(self) -> None:
+    def _initialize_redraw_observations(self, rng : np.random.Generator = None) -> None:
         '''
         Redraws table labels from base distribution
 
         Assumes: all _C valid (except  _C_num_labeled_upstream and _C_num_labeled_in_table)
+        Args:
+            rng: random number generator. Is self._rng by default
         Results:
             _C_y_0, _C_y, and C_table_values redrawn using the base measure
             _C_num_labeled_upstream and _C_num_labeled_in_table updated.
 
             all _C should be valid
         '''
+        if(rng is None):
+            rng = np.random.Generator
         # goes through each node in final layer
         for nn in range(self.N):
             #if unknown, draws label and sets label to entire table 
             if(self._C_y_0[nn,-1] == hddCRPModel.UNKNOWN_OBSERVATION):
                 table_num = self._C_tables[nn,-1]# table num
-                table_val = np.random.choice(self.M, self.BaseMeasure)
+                table_val = rng.choice(self.M, self.BaseMeasure)
 
                 self._C_table_values[table_num] = table_val
 
@@ -958,28 +991,29 @@ class hddCRPModel():
     Functions can swap connections and relable tables.
     ==========================================================================================================================================
     '''
-    def run_gibbs_sweep(self, order : ArrayLike = None, DEBUG_MODE : bool = False) -> np.ndarray:
+    def run_gibbs_sweep(self, order : ArrayLike = None, rng : np.random.Generator = None, DEBUG_MODE : bool = False) -> np.ndarray:
         '''
         Gibbs sampling for each node in the model. Each connection for a node is sampled one at a time (sequentially) from the posterior distribution 
         over connections given all the other connections (and the parameters: alpha, weight_params, and BaseMeasure).
 
-        Uses current np.random state
 
         Args:
           order: ((N*num_layers) x 2) Order of nodes to sample. Each row is a (node,layer) index.
                  By default, does all nodes in each layer from layer 0 to num_layers-1.
                  Within each layer, node order 0 to (N-1).
+          rng: The random number generator to use. Default value is self._rng
         Returns:
           tuple (codes, order)
           codes: numpy array(int) (length order.shape[0]) Set of internal debug codes for each gibbs step
         '''
+        
         if(order is None):
             order = np.concatenate((np.tile(np.arange(self.N),(self.num_layers))[:, np.newaxis],
                                     np.tile(np.arange(self.num_layers)[:,np.newaxis],(1,self.N)).flatten()[:,np.newaxis]), axis=1)
 
         codes = np.zeros((order.shape[0]), dtype=int)
         for ii in range(order.shape[0]):
-            codes[order[ii,0]] = self._gibbs_sample_single_node(order[ii,0], order[ii,1], DEBUG_MODE=DEBUG_MODE);
+            codes[order[ii,0]] = self._gibbs_sample_single_node(order[ii,0], order[ii,1], rng=rng, DEBUG_MODE=DEBUG_MODE);
         return (codes, order)
 
     def _post_for_single_nodes_connections(self, node : int, layer : int, print_msgs : bool = False ) -> tuple[list,np.ndarray]:
@@ -1103,23 +1137,23 @@ class hddCRPModel():
         post = p_Y * p_C
         return (can_connect_to, post, table_count_delta, Y_change, p_Y, p_C)
 
-    def _gibbs_sample_single_node(self, node : int, layer : int, DEBUG_MODE : bool = False) -> int:
+    def _gibbs_sample_single_node(self, node : int, layer : int, rng : np.random.Generator = None, DEBUG_MODE : bool = False) -> int:
         '''
         Samples from posterior probability for each possible connection for one node given all the other connections and observations (and alpha, weight_params, and BaseMeasure)
 
         Args:
           node: int in range(self.N)
           layer: int in range(self.num_layers)
+          rng: the random generator to use. Is self._rng by default
         Returns:
           (int) internal debug code for type of connection change (new table etc.)
 
         Results:
           Connection/table values can change
         '''
-        # can_connect_to,log_post = self._log_post_for_single_nodes_connections(node, layer);
-        # # gumbels = np.random.gumbel(size=can_connect_to.size)
-        # # node_to = can_connect_to[np.argmax(log_post + gumbels)]
-        # node_to = np.random.choice(can_connect_to, softmax(log_post))
+        
+        if(rng is None):
+            rng = self._rng;
         
         if(DEBUG_MODE):
             self._CB_y = self._C_y.copy()
@@ -1133,7 +1167,7 @@ class hddCRPModel():
             self._CB_num_labeled_upstream = self._C_num_labeled_upstream.copy()
 
         can_connect_to, post, *_ = self._post_for_single_nodes_connections(node, layer);
-        node_to = np.random.choice(can_connect_to, p = post/np.sum(post))
+        node_to = rng.choice(can_connect_to, p = post/np.sum(post))
 
         connection_type = self._set_connection(node, node_to, layer)
         if(DEBUG_MODE):
@@ -1161,7 +1195,7 @@ class hddCRPModel():
         '''
 
 
-        (log_P_cons, log_C) = self._compute_log_likelihood_connection(weight_params=weight_params, alphas=alphas)
+        (log_P_cons, log_C) = self._compute_log_likelihood_connection(alphas=alphas, weight_params=weight_params)
         log_p_Y_given_cons  = self._compute_log_P_table_assignments()
 
         return log_P_cons + log_p_Y_given_cons - log_C;
@@ -1773,60 +1807,59 @@ class hddCRPModel():
         print("C_num_labeled_in_table \n" + str(self._C_num_labeled_in_table))
         print("C_predecessors \n" + str(self._C_predecessors))
 
+class DualAveragingForStepSize():
 
+    def __init__(self, step_size_init = 0.1 ** 2):
+        self._delta  = 0.234
+        self._gamma  = 0.05
+        self._kappa  = 0.75
+        self._t_0    = 10
+        self._mu     = 2*np.log(0.1)
+        self._sum_H  = 0
+        self._t      = 0
+        self._step_size_init = step_size_init
+        self._x     = np.log(self._step_size_init)
+        self._x_bar = np.log(self._step_size_init)
 
-def Metropolis_Hastings_step_for_hddCRP_parameters(hddcrp : hddCRPModel, sigma2 : ArrayLike | float, log_prior_probability : Callable = None) -> tuple[hddCRPModel, float]:
-    '''
-    Takes a random-walk Metropolis-Hastings step for the hddCRP model parameters.
-    Here, I assume all parameters are positive. So, the sampling is in LOG space.
+    @property                         
+    def step_size_for_warmup(self):
+        return np.exp(self._x)
+        
+    @property  
+    def step_size_fixed(self):
+        return np.exp(self._x_bar)
 
-    Args:
-        hddcrp: The model to sample from.
-        sigma2: (scalar, vector of length hddcrp.num_parameters, or matrix size hddcrp.num_parameters x hddcrp.num_parameters) The size of the MH proposal step in each dimension.
-               If scalar, covariance of step is EYE(num_parameters)*sigma
-               If vector, covariance of step diag(sigma)
-               If matrix, is the full covariance matrix
-    Returns:
-        (hddcrp, log_acceptance_probability, accepted)
-        hddcrp: The hddCRPModel object.
-        log_acceptance_probability: (float) the log acceptance probability in the MH step
-        accepted: (bool) whether or not the sample was accepted (hddcrp is changed if True)
-    Raises:
-        ValueError: if sigma2 is incorrect shape
-    '''
-    theta_current = np.concatenate([hddcrp.alpha.flatten(), hddcrp.weight_params.flatten()]);
-    weight_idx = range(hddcrp.alpha.size, hddcrp.weight_params.size + hddcrp.alpha.size)
-    alpha_idx = range(hddcrp.alpha.size)
+    def to_dict(self):
+        dual_averaging_state = {}
+        dual_averaging_state["delta"]  = self._delta
+        dual_averaging_state["gamma"]  = self._gamma
+        dual_averaging_state["kappa"]  = self._kappa
+        dual_averaging_state["t_0"]    = self._t_0
+        dual_averaging_state["mu"]     = self._mu
+        dual_averaging_state["sum_H"]  = self._sum_H
+        dual_averaging_state["t"]      = self._t;
+        dual_averaging_state["x_bar"]      = self._x_bar;
+        dual_averaging_state["step_size_init"] = self._step_size_init
+        dual_averaging_state["step_size_for_warmup"] = self.step_size_for_warmup;
+        dual_averaging_state["step_size_fixed"]      = self.step_size_fixed;
+        return dual_averaging_state
 
-    log_theta_current = np.log(theta_current)
-    if(np.isscalar(sigma2)):
-        eps = np.random.normal(scale=np.sqrt(sigma2),size=theta_current.shape)
-    elif(np.size(sigma2) == np.size(theta_current)):
-        eps = np.random.normal(scale=np.sqrt(np.array(sigma2).flatten()))
-    elif(np.shape(sigma2) == (np.size(theta_current),)*2):
-        eps = np.random.multivariate_normal(np.zeros_like(theta_current), sigma2)
-    else:
-        raise ValueError("invalid variance for random-walk Metropolis-Hastings step")
+    def update(self,f_t):
+        #x_{t+1} \larrow \mu - \frac{\sqrt{t}}{\gamma*(t+t_0)}*\sum_{i=1}^t h_t
+        #\bar{x}_{t+1} \larrow \eta_{t}x_{t+1} + (1-\eta_t)\bar{x}_t
+        #\eta_{t} = t^{-\kappa}
 
-    log_theta_star = log_theta_current + eps;
-    theta_star = np.exp(log_theta_star)
+        self._t  += 1
 
-    log_p_Y_current = hddcrp.compute_log_likelihood()
-    log_p_Y_star = hddcrp.compute_log_likelihood(weight_params=theta_star[weight_idx], alphas=theta_star[alpha_idx])
+        h_t = self._delta - float(f_t);
+        self._sum_H  += h_t;
 
-    log_P_theta_current = log_prior_probability(theta_current) + np.sum(log_theta_current)
-    log_P_theta_star    = log_prior_probability(theta_star) + np.sum(log_theta_star)
+        self._x = self._mu - np.sqrt(self._t)/(self._gamma*(self._t + self._t_0)) * self._sum_H 
 
-    log_acceptance_probability = min(0.0, log_p_Y_star + log_P_theta_star - (log_p_Y_current + log_P_theta_current))
+        if(self._t <= 1):
+            self._x_bar = self._x
+        else:
+            eta = self._t ** (-self._kappa)
+            self._x_bar = eta*self._x + (1-eta)*self._x_bar
 
-    aa = -np.random.exponential()
-
-    if(aa > log_acceptance_probability):
-        accepted = True
-        hddcrp.alpha = theta_star[alpha_idx]
-        hddcrp.weight_params = theta_star[weight_idx]
-    else:
-        accepted = False
-
-    return (hddcrp, log_acceptance_probability, accepted)
 

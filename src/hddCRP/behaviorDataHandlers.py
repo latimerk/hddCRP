@@ -5,6 +5,7 @@ from typing import Callable
 
 
 from hddCRP.modelFitting import hddCRPModel
+from hddCRP.modelFitting import DualAveragingForStepSize
 from hddCRP.modelFitting import exponential_distance_function_for_maze_task, log_prior_for_maze_task, complete_exponential_distance_function_for_maze_task
 
 
@@ -110,7 +111,7 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
                         t2_start = session_start_indexes[ss_end]
                         D[t1_start:t1_end, t2_start:t2_end, variable_ctr] = ss_start - ss_end;
             variable_ctr += 1;
-            variable_names += [{"scale" : "session", "from" : block_types[bb_start], "to" : block_types[bb_end]}]
+            variable_names += [{"scale" : "session", "from" : block_types[bb_end], "to" : block_types[bb_start]}]
     
     # remove unused params
     vv = [np.any(~np.isinf(D[:,:,xx])) for xx in range(D.shape[2])];
@@ -120,7 +121,7 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
     
     return (D, variable_names)
 
-def parameter_vectorizer_for_distance_matrix(variable_names, session_types, within_session_time_constant = 10, between_session_time_constants = 50):#, between_session_scales = 1):
+def parameter_vectorizer_for_distance_matrix(variable_names, session_types, within_session_time_constant = 50, between_session_time_constants = 10):#, between_session_scales = 1):
     ## set up parameters in a specific vectorized form
     within_session_vars  = [xx for xx in variable_names if xx["scale"] == "trial"];
     between_session_vars = [xx for xx in variable_names if xx["scale"] == "session"];
@@ -134,9 +135,11 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
     for var in within_session_vars:
         if(var["label"] == ALL_BLOCK_TYPES):
             pos = 0;
+            param_names[pos] = "within_session_time_constant"
         else:
             pos = np.where(unique_session_types == var["label"])[0][0];
-        param_names[pos] = var;
+            param_names[pos] = "within_session_" + str(var["label"]) + "_time_constant"
+
         if(np.isscalar(within_session_time_constant)):
             params_vector[pos] = within_session_time_constant
         else:
@@ -152,8 +155,8 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
         # if within group exists
         between_session_vars = [xx for xx in variable_names if xx["scale"] == "session" and xx["to"] == from_label and xx["from"] == from_label];
         if(len(between_session_vars) > 0):
-            param_names[timescale_start + ctr] = between_session_vars[0];
-            param_names[timescale_start + ctr]["type"] = "timescale"
+            param_names[timescale_start + ctr] = str(between_session_vars[0]["from"]) + "_to_" + str(between_session_vars[0]["to"]) + "_session_time_constant";
+            #param_names[timescale_start + ctr]["type"] = "time_constant"
             # param_names[scalar_start + ctr] = between_session_vars[0];
             # param_names[scalar_start + ctr]["type"] = "scalar"
 
@@ -180,8 +183,8 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
             
             between_session_vars = [xx for xx in variable_names if xx["scale"] == "session" and xx["to"] == to_label and xx["from"] == from_label];
             if(len(between_session_vars) > 0):
-                param_names[timescale_start + ctr] = between_session_vars[0];
-                param_names[timescale_start + ctr]["type"] = "timescale"
+                param_names[timescale_start + ctr] = str(between_session_vars[0]["from"]) + "_to_" + str(between_session_vars[0]["to"]) + "_session_time_constant";
+                #param_names[timescale_start + ctr]["type"] = "time_constant"
                 # param_names[scalar_start + ctr] = between_session_vars[0];
                 # param_names[scalar_start + ctr]["type"] = "scalar"
                 
@@ -200,8 +203,8 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
     return (param_names, params_vector, num_within_session_timeconstants)
 
 # TODO: Function to take a set of sessions and return a hddCRPModel
-def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = 10,
-        weight_params_0 : float | ArrayLike = None ):
+def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = None,
+        weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None ):
 
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
     groupings = create_context_tree(seqs, depth=depth)
@@ -219,7 +222,12 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
     if(not weight_params_0 is None):
         params_vector[:] = weight_params_0
     else:
-        params_vector = np.log(params_vector);
+        params_vector[0] = rng.normal(np.log(25), scale=1)
+        params_vector[1:] = rng.normal(np.log(5), scale=1, size=(len(params_vector)-1))
+
+    if(alpha_0 is None):
+        alpha_0 = np.exp(np.array([rng.normal(np.log(10 * (1+ii)), scale=1) for ii in range(depth)]))
+    
     weight_func = lambda xx,yy : exponential_distance_function_for_maze_task(xx, yy)
 
     D = np.min(D_0, axis=2)
@@ -229,7 +237,7 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
     complete_weight_func = lambda d, log_timescales : complete_exponential_distance_function_for_maze_task(d, log_timescales, inds)
 
     return hddCRPModel(Y, groupings, alpha_0, D,
-                       weight_params=params_vector, weight_func=None, weight_param_labels=param_names, complete_weight_func=complete_weight_func)
+                       weight_params=params_vector, weight_func=None, weight_param_labels=param_names, complete_weight_func=complete_weight_func, rng=rng)
 
 
 def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayLike | float) -> tuple[hddCRPModel, float]:
@@ -256,13 +264,13 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayL
     alpha_idx = range(hddcrp.alpha.size)
 
     if(np.isscalar(sigma2)):
-        eps = np.random.normal(scale=np.sqrt(sigma2),size=theta_current.shape)
+        eps = hddcrp._rng.normal(scale=np.sqrt(sigma2),size=theta_current.shape)
     elif(np.size(sigma2) == np.size(theta_current)):
-        eps = np.random.normal(scale=np.sqrt(np.array(sigma2).flatten()))
+        eps = hddcrp._rng.normal(scale=np.sqrt(np.array(sigma2).flatten()))
     elif(np.shape(sigma2) == (np.size(theta_current),)*2):
-        eps = np.random.multivariate_normal(np.zeros_like(theta_current), sigma2)
+        eps = hddcrp._rng.multivariate_normal(np.zeros_like(theta_current), sigma2)
     else:
-        raise ValueError("invalid variance for random-walk Metropolis-Hastings step")
+        raise ValueError("invalid variance for random-walk Metropolis-Hastings step: " + str(sigma2))
 
     theta_star = theta_current + eps;
 
@@ -285,19 +293,31 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayL
 
     return (hddcrp, log_acceptance_probability, accepted)
 
-def sample_model_for_maze_data_with_fixed_MH_step(hddcrp : hddCRPModel, num_samples : int, sigma2 = 0.1**2):
+def sample_model_for_maze_data(hddcrp : hddCRPModel, num_samples : int, num_warmup_samples : int):
     num_samples = int(num_samples)
+    num_warmup_samples = int(num_warmup_samples)
     assert num_samples > 0, "must sample positive number of values"
+    assert num_warmup_samples >= 0, "must sample positive number of values"
+
+    num_samples_total = num_samples + num_warmup_samples
+
+    step_size_settings = DualAveragingForStepSize();
     
-    log_acceptance_probability = np.zeros((num_samples))
-    accepted = np.zeros((num_samples),dtype=bool)
-    alphas = np.zeros((num_samples,hddcrp.alpha.size))
-    log_taus = np.zeros((num_samples,hddcrp.weight_params.size))
-    for ss in range(num_samples):
+    samples = {"log_acceptance_probability" : np.zeros((num_samples_total)),
+               "accepted" : np.zeros((num_samples_total),dtype=bool),
+               "alphas"   : np.zeros((num_samples_total,hddcrp.alpha.size)),
+               "log_taus" : np.zeros((num_samples_total,hddcrp.weight_params.size)),
+               "num_warmup_samples" : num_warmup_samples}
+    
+    for ss in range(num_samples_total):
         hddcrp.run_gibbs_sweep()
-        hddcrp, log_acceptance_probability[ss], accepted[ss] = Metropolis_Hastings_step_for_maze_data(hddcrp, sigma2)
+        sigma2 = step_size_settings.step_size_fixed if ss >= num_warmup_samples else step_size_settings.step_size_for_warmup
+        hddcrp, samples["log_acceptance_probability"][ss], samples["accepted"][ss] = Metropolis_Hastings_step_for_maze_data(hddcrp, sigma2)
 
-        alphas[ss,:] = hddcrp.alpha
-        log_taus[ss,:] = hddcrp.weight_params
+        samples["alphas"][ss,:] = hddcrp.alpha
+        samples["log_taus"][ss,:] = hddcrp.weight_params
 
-    return (hddcrp, alphas, log_taus, log_acceptance_probability, accepted)
+        if(ss < num_warmup_samples):
+            step_size_settings.update(np.exp(samples["log_acceptance_probability"][ss]))
+
+    return (hddcrp, samples, step_size_settings)
