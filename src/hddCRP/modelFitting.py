@@ -38,6 +38,29 @@ def complete_exponential_distance_function_for_maze_task(d, log_timescales, inds
         F[inds == ii] = np.exp(-np.abs(d[inds == ii])/timescales[ii])
     return F
 
+def uniform_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions,
+                            log_alpha_min : float = -np.inf, log_alpha_max : float = np.log(2000),
+                            log_timescale_within_min  : float | ArrayLike = -np.inf, log_timescale_within_max  : float | ArrayLike = np.log(500),
+                            log_timescale_between_min : float | ArrayLike = -np.inf, log_timescale_between_max : float | ArrayLike = np.log(100)):
+
+    log_p_alphas_b = (log_alphas >= log_alpha_min) & (log_alphas <= log_alpha_max)
+    log_p_alphas = np.zeros_like(log_p_alphas_b, dtype=float)
+    log_p_alphas[~log_p_alphas_b] = -np.inf
+
+    log_p_timescales_within_session_b  = ((log_timescales_within_session >= log_timescale_within_min) 
+                                         & (log_timescales_within_session <= log_timescale_within_max))
+    log_p_timescales_within_session = np.zeros_like(log_p_timescales_within_session_b, dtype=float)
+    log_p_timescales_within_session[~log_p_timescales_within_session_b] = -np.inf
+    
+    log_p_timescales_between_session_b = ((log_timescales_between_sessions >= log_timescale_between_min)
+                                         & (log_timescales_between_sessions <= log_timescale_between_max))
+    log_p_timescales_between_session = np.zeros_like(log_p_timescales_between_session_b, dtype=float)
+    log_p_timescales_between_session[~log_p_timescales_between_session_b] = -np.inf
+
+    log_prior = np.sum(log_p_timescales_within_session) + np.sum(log_p_timescales_between_session) + np.sum(log_p_alphas)
+
+    return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas
+
 def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions,
                             alpha_loc : float | ArrayLike = np.log(25), alpha_df = 4, alpha_scale : float | ArrayLike = 1,
                             timescale_within_loc  : float | ArrayLike = np.log(25), timescale_within_df = 4, timescale_within_scale  : float | ArrayLike = 1,
