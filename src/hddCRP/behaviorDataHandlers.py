@@ -202,15 +202,15 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
 
 # TODO: Function to take a set of sessions and return a hddCRPModel
 def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = None,
-        weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None ):
+        weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None, sequential_distances_only : bool = True ):
 
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
     groupings = create_context_tree(seqs, depth=depth)
     D_0, distance_labels = create_distance_matrix(seqs, block_ids,
                                                 distinct_within_session_distance_params = False,
-                                                sequential_within_session_distances = False,
-                                                sequential_between_session_same_block_distances = False,
-                                                sequential_between_session_different_block_distances = False,
+                                                sequential_within_session_distances = sequential_distances_only,
+                                                sequential_between_session_same_block_distances = sequential_distances_only,
+                                                sequential_between_session_different_block_distances = sequential_distances_only,
                                                 within_block_distance_in_total_sessions  = True);
 
     param_names, params_vector, num_within_session_timeconstants = parameter_vectorizer_for_distance_matrix(distance_labels, np.unique(block_ids))
