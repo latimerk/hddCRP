@@ -34,9 +34,9 @@ def create_context_tree(seqs : list[ArrayLike], depth : int = 3, delim : str = "
     return np.concatenate([create_context_tree_single_session(ss, depth=depth, delim=delim) for ss in seqs], axis=0)
 
 # TODO: Function to get distances from a set of time series actions (set of sessions)
-def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   distinct_within_session_distance_params : bool = False,
-                                                                            sequential_within_session_distances : bool = False,
-                                                                            sequential_between_session_same_block_distances : bool = False,
+def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   distinct_within_session_distance_params : bool = True,
+                                                                            sequential_within_session_distances : bool = True,
+                                                                            sequential_between_session_same_block_distances : bool = True,
                                                                             sequential_between_session_different_block_distances : bool = True,
                                                                             within_block_distance_in_total_sessions : bool = True):
     block_ids = np.array(block_ids).flatten()
@@ -207,7 +207,7 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
     groupings = create_context_tree(seqs, depth=depth)
     D_0, distance_labels = create_distance_matrix(seqs, block_ids,
-                                                distinct_within_session_distance_params = False,
+                                                distinct_within_session_distance_params = True,
                                                 sequential_within_session_distances = sequential_distances_only,
                                                 sequential_between_session_same_block_distances = sequential_distances_only,
                                                 sequential_between_session_different_block_distances = sequential_distances_only,
@@ -238,7 +238,7 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
                        weight_params=params_vector, weight_func=None, weight_param_labels=param_names, complete_weight_func=complete_weight_func, rng=rng)
 
 
-def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayLike | float, uniform_prior : bool = True) -> tuple[hddCRPModel, float]:
+def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayLike | float, uniform_prior : bool = False) -> tuple[hddCRPModel, float]:
     '''
     Takes a random-walk Metropolis-Hastings step for the hddCRP model parameters.
     Here, I assume all parameters can take any float value - the prior must do the transform for any constraints.
@@ -295,7 +295,7 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayL
 
     return (hddcrp, log_acceptance_probability, accepted)
 
-def sample_model_for_maze_data(hddcrp : hddCRPModel, num_samples : int, num_warmup_samples : int, uniform_prior : bool = True):
+def sample_model_for_maze_data(hddcrp : hddCRPModel, num_samples : int, num_warmup_samples : int, uniform_prior : bool = False):
     num_samples = int(num_samples)
     num_warmup_samples = int(num_warmup_samples)
     assert num_samples > 0, "must sample positive number of values"

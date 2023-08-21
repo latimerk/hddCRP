@@ -51,7 +51,7 @@ def uniform_prior_for_maze_task(log_alphas, log_timescales_within_session, log_t
                                          & (log_timescales_within_session <= log_timescale_within_max))
     log_p_timescales_within_session = np.zeros_like(log_p_timescales_within_session_b, dtype=float)
     log_p_timescales_within_session[~log_p_timescales_within_session_b] = -np.inf
-    
+
     log_p_timescales_between_session_b = ((log_timescales_between_sessions >= log_timescale_between_min)
                                          & (log_timescales_between_sessions <= log_timescale_between_max))
     log_p_timescales_between_session = np.zeros_like(log_p_timescales_between_session_b, dtype=float)
@@ -62,15 +62,15 @@ def uniform_prior_for_maze_task(log_alphas, log_timescales_within_session, log_t
     return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas
 
 def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions,
-                            alpha_loc : float | ArrayLike = np.log(25), alpha_df = 4, alpha_scale : float | ArrayLike = 1,
-                            timescale_within_loc  : float | ArrayLike = np.log(25), timescale_within_df = 4, timescale_within_scale  : float | ArrayLike = 1,
-                            timescale_between_loc : float | ArrayLike = np.log(5), timescale_between_df = 4, timescale_between_scale : float | ArrayLike = 1):
+                            alpha_loc : float | ArrayLike = np.log(25),  alpha_scale : float | ArrayLike = 1.5,
+                            timescale_within_loc  : float | ArrayLike = np.log(25), timescale_within_scale  : float | ArrayLike = 1.5,
+                            timescale_between_loc : float | ArrayLike = np.log(5), timescale_between_scale : float | ArrayLike = 1.5):
 
-    log_p_alphas = t_dist.logpdf(log_alphas, loc=alpha_loc, df=alpha_df, scale=alpha_scale)
+    log_p_alphas = norm.logpdf(log_alphas, loc=alpha_loc,  scale=alpha_scale)
 
-    log_p_timescales_within_session = t_dist.logpdf(log_timescales_within_session, loc=timescale_within_loc, df=timescale_within_df , scale=timescale_within_scale)
+    log_p_timescales_within_session = norm.logpdf(log_timescales_within_session, loc=timescale_within_loc,  scale=timescale_within_scale)
         
-    log_p_timescales_between_session = t_dist.logpdf(log_timescales_between_sessions, loc=timescale_between_loc, df=timescale_between_df, scale=timescale_between_scale)
+    log_p_timescales_between_session = norm.logpdf(log_timescales_between_sessions, loc=timescale_between_loc, scale=timescale_between_scale)
 
     log_prior = log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_alphas.sum()
 
