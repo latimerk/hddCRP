@@ -9,6 +9,7 @@ from inspect import signature
 from scipy.special import softmax
 from scipy.special import logsumexp
 from scipy.stats import invgamma
+from scipy.stats import gamma
 from scipy.stats import t as t_dist
 from scipy.stats import norm
 
@@ -32,18 +33,17 @@ def exponential_distance_function_for_maze_task(f, weights):
     
 def complete_exponential_distance_function_for_maze_task(d, log_params, inds, timescale_inds, log_scale_inds):
     params = np.exp(log_params)
-    d = d.squeeze()
-    F = np.zeros_like(d);
+    F = np.zeros(d.shape[:2]);
     for ii in range(timescale_inds.size):
         if(log_scale_inds[ii] >= 0):
             log_scale = log_params[log_scale_inds[ii]]
         else:
             log_scale = 0
-        F[inds == ii] = np.exp(-np.abs(d[inds == ii])/params[timescale_inds[ii]] + log_scale)
+        F[inds == ii] = np.exp(-np.abs(d[inds == ii,0])/params[timescale_inds[ii]] + log_scale)
     return F
 
 def uniform_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions, log_scales_between_sessions = 0,
-                            log_alpha_min : float = -np.inf, log_alpha_max : float = np.log(2000),
+                            log_alpha_min : float = -np.inf, log_alpha_max : float = np.log(1000),
                             log_timescale_within_min  : float | ArrayLike = -np.inf, log_timescale_within_max  : float | ArrayLike = np.log(1000),
                             log_timescale_between_min : float | ArrayLike = -np.inf, log_timescale_between_max : float | ArrayLike = np.log(500),
                             log_scale_between_min : float | ArrayLike = -np.inf, log_scale_between_max : float | ArrayLike = np.log(1)):
@@ -71,23 +71,46 @@ def uniform_prior_for_maze_task(log_alphas, log_timescales_within_session, log_t
 
     return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas, log_p_scales_between_session
 
+
 def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions, log_scales_between_sessions = 0,
-                            alpha_loc : float | ArrayLike = np.log(25),  alpha_scale : float | ArrayLike = 1.5,
-                            timescale_within_loc  : float | ArrayLike = np.log(25), timescale_within_scale  : float | ArrayLike = 1.5,
-                            timescale_between_loc : float | ArrayLike = np.log(5), timescale_between_scale : float | ArrayLike = 1.5,
-                            scale_between_loc : float | ArrayLike = 0, scale_between_scale : float | ArrayLike = 0.5):
+                            alpha_shape : float | ArrayLike = 2,  alpha_scale : float | ArrayLike = 10,
+                            timescale_between_shape : float | ArrayLike = 2, timescale_between_scale : float | ArrayLike = 10,
+                            timescale_within_shape : float | ArrayLike = 2, timescale_within_scale  : float | ArrayLike = 50,
+                            scale_between_shape : float | ArrayLike = 2, scale_between_scale : float | ArrayLike = 10):
 
-    log_p_alphas = norm.logpdf(log_alphas, loc=alpha_loc,  scale=alpha_scale)
+    log_p_alphas = gamma.logpdf(np.exp(log_alphas), alpha_shape,  scale=alpha_scale)
+    log_p_alphas += log_alphas
 
-    log_p_timescales_within_session = norm.logpdf(log_timescales_within_session, loc=timescale_within_loc,  scale=timescale_within_scale)
+    log_p_timescales_within_session = gamma.logpdf(np.exp(log_timescales_within_session), timescale_within_shape,  scale=timescale_within_scale)
+    log_p_timescales_within_session += log_timescales_within_session
         
-    log_p_timescales_between_session = norm.logpdf(log_timescales_between_sessions, loc=timescale_between_loc, scale=timescale_between_scale)
+    log_p_timescales_between_session = gamma.logpdf(np.exp(log_timescales_between_sessions), timescale_between_shape, scale=timescale_between_scale)
+    log_p_timescales_between_session += log_timescales_between_sessions
     
-    log_p_scales_between_session = norm.logpdf(log_scales_between_sessions, loc=scale_between_loc, scale=scale_between_scale)
+    log_p_scales_between_session = gamma.logpdf(np.exp(log_scales_between_sessions), scale_between_shape, scale=scale_between_scale)
+    log_p_scales_between_session += log_scales_between_sessions
 
     log_prior = log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_scales_between_session.sum()  + log_p_alphas.sum()
 
     return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas, log_p_scales_between_session
+
+# def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions, log_scales_between_sessions = 0,
+#                             alpha_loc : float | ArrayLike = np.log(25),  alpha_scale : float | ArrayLike = 1.5,
+#                             timescale_within_loc  : float | ArrayLike = np.log(25), timescale_within_scale  : float | ArrayLike = 1.5,
+#                             timescale_between_loc : float | ArrayLike = np.log(5), timescale_between_scale : float | ArrayLike = 1.5,
+#                             scale_between_loc : float | ArrayLike = 0, scale_between_scale : float | ArrayLike = 0.5):
+
+#     log_p_alphas = norm.logpdf(log_alphas, loc=alpha_loc,  scale=alpha_scale)
+
+#     log_p_timescales_within_session = norm.logpdf(log_timescales_within_session, loc=timescale_within_loc,  scale=timescale_within_scale)
+        
+#     log_p_timescales_between_session = norm.logpdf(log_timescales_between_sessions, loc=timescale_between_loc, scale=timescale_between_scale)
+    
+#     log_p_scales_between_session = norm.logpdf(log_scales_between_sessions, loc=scale_between_loc, scale=scale_between_scale)
+
+#     log_prior = log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_scales_between_session.sum()  + log_p_alphas.sum()
+
+#     return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas, log_p_scales_between_session
           
 # def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions,
 #                             alpha_shape : float | ArrayLike = 3, alpha_scale : float | ArrayLike = 100,
@@ -761,16 +784,18 @@ class hddCRPModel():
                 if(YY[node] != hddCRPModel.UNKNOWN_OBSERVATION):
                     # can connect to same label nodes or unknown label nodes
                     can_connect_to = gg[(YY[gg] == YY[node]) | (YY[gg] == hddCRPModel.UNKNOWN_OBSERVATION)];
+                    alpha_c = alpha * self.BaseMeasure[YY[node]]
                 # if isn't labeled
                 else:
                     # can connect to all in group
                     can_connect_to = gg;
+                    alpha_c = alpha;
                 # print("node " + str(node) + " " + str(can_connect_to))
                 # print("YY " + str(YY))
 
                 # get weights of nodes possible to connect to
                 ps = self._F[node, can_connect_to];
-                ps[can_connect_to == node] = alpha; # above layer is unlabeled: this is always an option
+                ps[can_connect_to == node] = alpha_c; # above layer is unlabeled: this is always an option
                 ps = ps/ps.sum()
 
                 #generate a connection
@@ -1101,7 +1126,6 @@ class hddCRPModel():
         assert can_connect_to.size > 0, "node has no possible connections"
 
         # get table info for all possible connections
-        table_count_delta = np.zeros((can_connect_to.size),dtype=int);
 
         destination_tables = self._C_tables[can_connect_to,layer];
         if(layer > 0):
@@ -1111,65 +1135,37 @@ class hddCRPModel():
         destination_Y = self._C_table_values[destination_tables];
 
         # probabilities of observing each table count that a move is associated with (connecting UNKNOWN_OBSERVATION to a known table will determine table type)
-        # log_G_delta = np.zeros((can_connect_to.size));
-        # if(Y_type != hddCRPModel.UNKNOWN_OBSERVATION):
-        #     log_G_delta[:] = self.log_BaseMeasure[Y_type]
-        # log_G_delta[destination_Y != hddCRPModel.UNKNOWN_OBSERVATION] = self.log_BaseMeasure[destination_Y[destination_Y != hddCRPModel.UNKNOWN_OBSERVATION]];
-        G_delta = np.ones((can_connect_to.size));
+
+        p_Y = np.ones((can_connect_to.size));
         if(Y_type != hddCRPModel.UNKNOWN_OBSERVATION):
-            G_delta[:] = self.BaseMeasure[Y_type]
-        G_delta[destination_Y != hddCRPModel.UNKNOWN_OBSERVATION] = self.BaseMeasure[destination_Y[destination_Y != hddCRPModel.UNKNOWN_OBSERVATION]];
+            G_delta = 1.0/self.BaseMeasure[Y_type]
+        else:
+            G_delta = 0
 
         Y_change = destination_Y;
         Y_change[destination_Y == hddCRPModel.UNKNOWN_OBSERVATION] = Y_type;
 
-        if(print_msgs):
-            print("HERE0")
+        # If table counts change (relative to tables without [node,layer] connection to anything at all)
+        if(carrying_label):
 
-        # label each node as splitting, combining, or the same
-        if(is_cycle):
-            #if is in cycle, connecting node to out of table will combine tables
-                # for combining, will it change number of labeled nodes?
-                    # if t1 or t2 are unlabeled: no change in counts
-                    # if both labeled, subtracts 1 from count
-            if(print_msgs):
-                print("HERE1")
-            if(carrying_label):
-                vv = out_of_table & (destination_Y != hddCRPModel.UNKNOWN_OBSERVATION);
-                if(print_msgs):
-                    print("HERE2 " + str(vv))
-                    print("  vv " + str(vv))
-                    print("  out_of_table " + str(out_of_table))
-                    print("  destination_Y " + str(destination_Y))
-                    print("  destination_tables " + str(destination_tables))
-                table_count_delta[vv] -= 1;
-
-        else:
-            has_labeled_nodes_remaining = (self._C_num_labeled_in_table[table_num] - self._C_num_labeled_upstream[node, layer]) > 0; # any initially labeled nodes in table that don't point towards the current node
+            if(is_cycle):
+                has_labeled_nodes_remaining = False
+            else:
+                has_labeled_nodes_remaining = (self._C_num_labeled_in_table[table_num] - self._C_num_labeled_upstream[node, layer]) > 0; # any initially labeled nodes in table that don't point towards the current node
+            
             if(has_labeled_nodes_remaining): # only need to compute follow if this is true
                 upstream_nodes = self._get_preceeding_nodes_within_layer(node, layer); # nodes with connections leading to current node (or current node!)
                 if(layer > 0):
-                    del(upstream_nodes[0])
+                   del(upstream_nodes[0])
+            
+                # effectively "combine" tables with downstream nodes
+                p_Y[(~out_of_table) & (~np.isin(can_connect_to, upstream_nodes))] = G_delta; 
 
-            #if not in cycle, connecting node to out of table add to other table
-                # for partial combining, will it change number of labeled nodes?
-                    # if current node labeled (something upstream AND downstream of node labeled) and t2 not labeled, will add one
-                    # otherwise, no change
-            if(has_labeled_nodes_remaining and carrying_label):
-                table_count_delta[out_of_table & (destination_Y == hddCRPModel.UNKNOWN_OBSERVATION)] += 1;
-            if(not has_labeled_nodes_remaining and carrying_label):
-                table_count_delta[out_of_table & (destination_Y != hddCRPModel.UNKNOWN_OBSERVATION)] -= 1;
-
-            # if is not in the cycle, changing connection to a preceding node will split the table
-            if(has_labeled_nodes_remaining and carrying_label):
-                # for splitting, will it change number of labeled nodes?
-                    # if both new tables contain labeled nodes, adds one
-                    # otherwise, stays the same
-                table_count_delta[np.isin(can_connect_to, upstream_nodes)] += 1;
+            p_Y[ out_of_table & (destination_Y != hddCRPModel.UNKNOWN_OBSERVATION)] = G_delta; 
+                
 
         # probability (up to a constant) of P(table observation values | connections)
         # log_p_Y = log_G_delta * table_count_delta;
-        p_Y = G_delta ** table_count_delta;
 
         # gets the log prior probability of each connection (up to a constant)
         p_C = self._F[node,can_connect_to]
@@ -1183,7 +1179,7 @@ class hddCRPModel():
 
         # gets  posterior probability
         post = p_Y * p_C
-        return (can_connect_to, post, table_count_delta, Y_change, p_Y, p_C)
+        return (can_connect_to, post, Y_change, p_Y, p_C)
 
     def _gibbs_sample_single_node(self, node : int, layer : int, rng : np.random.Generator = None, DEBUG_MODE : bool = False) -> int:
         '''
@@ -1294,6 +1290,24 @@ class hddCRPModel():
             log_P_cons += np.sum(np.log(w_c))
 
         return (log_P_cons, log_C)
+
+    def _compute_distribution_info_for_alphas(self, weight_params = None) -> tuple:
+
+        # get connection weights
+        if(weight_params is None): 
+            weights = self._F
+        else:
+            weight_params = np.array(weight_params);
+            assert weight_params.size == self._weight_params.size, "weight_params is not the correct size"
+            weights = self._compute_weights(weight_params);
+
+        K = np.sum(self._C_ptr == np.arange(0,self.N,dtype=int)[:,np.newaxis], axis=0).squeeze() 
+        S = np.zeros((self.N, self.num_layers))
+        for ll in range(self.num_layers):
+            for gg in self._group_indicies[ll]:
+                S[gg,ll] = np.sum(weights[:,gg][gg,:],axis=1)
+
+        return (K, S.squeeze())
 
     def _compute_log_P_table_assignments(self, LogBaseMeasure : ArrayLike = None) -> float:
         '''
@@ -1689,6 +1703,8 @@ class hddCRPModel():
         F = self._complete_weight_func(self._D, weights) # mnp.apply_along_axis(lambda rr : self._weight_func(rr, weights), 2, self._D)
         np.fill_diagonal(F, 0);
         return F;
+
+
 
 
     '''
