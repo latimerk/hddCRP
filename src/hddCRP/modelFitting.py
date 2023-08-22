@@ -33,13 +33,14 @@ def exponential_distance_function_for_maze_task(f, weights):
     
 def complete_exponential_distance_function_for_maze_task(d, log_params, inds, timescale_inds, log_scale_inds):
     params = np.exp(log_params)
-    F = np.zeros(d.shape[:2]);
+    d = d.squeeze()
+    F = np.zeros_like(d,dtype=float);
     for ii in range(timescale_inds.size):
         if(log_scale_inds[ii] >= 0):
             log_scale = log_params[log_scale_inds[ii]]
         else:
             log_scale = 0
-        F[inds == ii] = np.exp(-np.abs(d[inds == ii,0])/params[timescale_inds[ii]] + log_scale)
+        F[inds == ii] = np.exp(-np.abs(d[inds == ii])/params[timescale_inds[ii]] + log_scale)
     return F
 
 def uniform_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions, log_scales_between_sessions = 0,
