@@ -32,28 +32,64 @@ def exponential_distance_function_for_maze_task(f, weights):
     #     timescale = np.exp(weights[vv])
     #     return np.prod(np.exp(-(np.abs(f[vv])/timescale)))
     
-def complete_exponential_distance_function_for_maze_task(d, log_timescales, inds):
-    timescales = np.exp(log_timescales)
+def complete_exponential_distance_function_for_maze_task(d, log_params, inds, timescale_inds, log_scale_inds):
+    params = np.exp(log_params)
     d = d.squeeze()
     F = np.zeros_like(d);
-    for ii in range(timescales.size):
-        F[inds == ii] = np.exp(-np.abs(d[inds == ii])/timescales[ii])
+    for ii in range(timescale_inds.size):
+        if(log_scale_inds[ii] >= 0):
+            log_scale = log_params[log_scale_inds[ii]]
+        else:
+            log_scale = 0
+        F[inds == ii] = np.exp(-np.abs(d[inds == ii])/params[timescale_inds[ii]] + log_scale)
     return F
 
-def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions,
-                            alpha_loc : float | ArrayLike = np.log(25), alpha_df = 4, alpha_scale : float | ArrayLike = 1,
-                            timescale_within_loc  : float | ArrayLike = np.log(25), timescale_within_df = 4, timescale_within_scale  : float | ArrayLike = 1,
-                            timescale_between_loc : float | ArrayLike = np.log(5), timescale_between_df = 4, timescale_between_scale : float | ArrayLike = 1):
+def uniform_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions, log_scales_between_sessions = 0,
+                            log_alpha_min : float = -np.inf, log_alpha_max : float = np.log(2000),
+                            log_timescale_within_min  : float | ArrayLike = -np.inf, log_timescale_within_max  : float | ArrayLike = np.log(1000),
+                            log_timescale_between_min : float | ArrayLike = -np.inf, log_timescale_between_max : float | ArrayLike = np.log(500),
+                            log_scale_between_min : float | ArrayLike = -np.inf, log_scale_between_max : float | ArrayLike = np.log(1)):
 
-    log_p_alphas = t_dist.logpdf(log_alphas, loc=alpha_loc, df=alpha_df, scale=alpha_scale)
+    log_p_alphas_b = (log_alphas >= log_alpha_min) & (log_alphas <= log_alpha_max)
+    log_p_alphas = np.zeros_like(log_p_alphas_b, dtype=float) + log_alphas
+    log_p_alphas[~log_p_alphas_b] = -np.inf
 
-    log_p_timescales_within_session = t_dist.logpdf(log_timescales_within_session, loc=timescale_within_loc, df=timescale_within_df , scale=timescale_within_scale)
+    log_p_timescales_within_session_b  = ((log_timescales_within_session >= log_timescale_within_min) 
+                                         & (log_timescales_within_session <= log_timescale_within_max))
+    log_p_timescales_within_session = np.zeros_like(log_p_timescales_within_session_b, dtype=float) + log_timescales_within_session
+    log_p_timescales_within_session[~log_p_timescales_within_session_b] = -np.inf
+
+    log_p_timescales_between_session_b = ((log_timescales_between_sessions >= log_timescale_between_min)
+                                         & (log_timescales_between_sessions <= log_timescale_between_max))
+    log_p_timescales_between_session = np.zeros_like(log_p_timescales_between_session_b, dtype=float) + log_timescales_between_sessions
+    log_p_timescales_between_session[~log_p_timescales_between_session_b] = -np.inf
+    
+    log_p_scales_between_session_b = ((log_scales_between_sessions >= log_scale_between_min)
+                                         & (log_scales_between_sessions <= log_scale_between_max))
+    log_p_scales_between_session = np.zeros_like(log_p_scales_between_session_b, dtype=float) + log_scales_between_sessions
+    log_p_scales_between_session[~log_p_scales_between_session_b] = -np.inf
+
+    log_prior = np.sum(log_p_timescales_within_session) + np.sum(log_p_timescales_between_session) + np.sum(log_p_alphas) + np.sum(log_p_scales_between_session)
+
+    return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas, log_p_scales_between_session
+
+def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions, log_scales_between_sessions = 0,
+                            alpha_loc : float | ArrayLike = np.log(25),  alpha_scale : float | ArrayLike = 1.5,
+                            timescale_within_loc  : float | ArrayLike = np.log(25), timescale_within_scale  : float | ArrayLike = 1.5,
+                            timescale_between_loc : float | ArrayLike = np.log(5), timescale_between_scale : float | ArrayLike = 1.5,
+                            scale_between_loc : float | ArrayLike = 0, scale_between_scale : float | ArrayLike = 0.5):
+
+    log_p_alphas = norm.logpdf(log_alphas, loc=alpha_loc,  scale=alpha_scale)
+
+    log_p_timescales_within_session = norm.logpdf(log_timescales_within_session, loc=timescale_within_loc,  scale=timescale_within_scale)
         
-    log_p_timescales_between_session = t_dist.logpdf(log_timescales_between_sessions, loc=timescale_between_loc, df=timescale_between_df, scale=timescale_between_scale)
+    log_p_timescales_between_session = norm.logpdf(log_timescales_between_sessions, loc=timescale_between_loc, scale=timescale_between_scale)
+    
+    log_p_scales_between_session = norm.logpdf(log_scales_between_sessions, loc=scale_between_loc, scale=scale_between_scale)
 
-    log_prior = log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_alphas.sum()
+    log_prior = log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_scales_between_session.sum()  + log_p_alphas.sum()
 
-    return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas
+    return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas, log_p_scales_between_session
           
 # def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions,
 #                             alpha_shape : float | ArrayLike = 3, alpha_scale : float | ArrayLike = 100,
@@ -182,7 +218,8 @@ class hddCRPModel():
                        D : ArrayLike,
                        Y_values : ArrayLike = None, BaseMeasure : ArrayLike | None = None,
                        weight_params : float | ArrayLike = 1, weight_func : Callable = lambda x, y : np.sum(np.greater(x,0)*y), weight_param_labels : list[str] = None,
-                       complete_weight_func : Callable = None, rng : np.random.Generator = None) -> None:
+                       complete_weight_func : Callable = None, rng : np.random.Generator = None,
+                       is_sequential : bool = False) -> None:
         """
         Sets up a hierarchical distance dependent Chinese restaurant process (hddCRP) model.
         This is a basic model that assumes the observations are from a discrete distribution and fully observed (not a mixture model,
@@ -308,6 +345,8 @@ class hddCRPModel():
         self.alpha = alpha;
         # sets up base measure
         self.BaseMeasure = BaseMeasure;
+
+        self.is_sequential = is_sequential
 
         # sets up and validates D as a numpy array: makes K property valid
         self._D = np.array(D,dtype=float)
@@ -571,40 +610,47 @@ class hddCRPModel():
               valid: _C_y_0 (int array size N x num_layers) contains the truly observation value of all nodes in all layers (will be UNKNOWN_OBSERVATION in shallow layters)
 
         '''
-        #self._C_matrix = np.zeros((self.N,self.N,self.num_layers),dtype=bool)# row,col,depth=True means node row connects to node col at depth
-        self._C_ptr = -1*np.ones((self.N,self.num_layers),dtype=int); #C_ptr[row,depth] says the node that node row at depth layer connects to
-        self._C_is_cycle = np.zeros((self.N,self.num_layers),dtype=bool); # if each node with within the "cycle" portion of the table: helper variable for computations
-                                                                          # note: in this digraph, each component can (and must) contain one cycle: everything else points into the cycle
-        self._C_predecessors = [[[] for nn in range(self.N)] for ll in range(self.num_layers)] # look up table to get lists of node with arrows pointing TO each node
-                            # only conncerned about nodes WITHIN each layer: used to make one step faster, accessed: self._C_predecessors[layer][node]
-        self._C_tables = np.zeros((self.N,self.num_layers),dtype=int); #table numbers for each node in the ddCRP (a connected component of the digraph)
+        if(self.is_sequential):
+            self._C_y_0 = np.zeros((self.N, self.num_layers), dtype=int)
+            self._C_y_0.fill(hddCRPModel.UNKNOWN_OBSERVATION)
+            for ii,jj in enumerate(self._Y_indicies):
+                self._C_y_0[jj,-1] = ii;
+            self._C_y.fill(hddCRPModel.UNKNOWN_OBSERVATION);
+        else:
+            #self._C_matrix = np.zeros((self.N,self.N,self.num_layers),dtype=bool)# row,col,depth=True means node row connects to node col at depth
+            self._C_ptr = -1*np.ones((self.N,self.num_layers),dtype=int); #C_ptr[row,depth] says the node that node row at depth layer connects to
+            self._C_is_cycle = np.zeros((self.N,self.num_layers),dtype=bool); # if each node with within the "cycle" portion of the table: helper variable for computations
+                                                                            # note: in this digraph, each component can (and must) contain one cycle: everything else points into the cycle
+            self._C_predecessors = [[[] for nn in range(self.N)] for ll in range(self.num_layers)] # look up table to get lists of node with arrows pointing TO each node
+                                # only conncerned about nodes WITHIN each layer: used to make one step faster, accessed: self._C_predecessors[layer][node]
+            self._C_tables = np.zeros((self.N,self.num_layers),dtype=int); #table numbers for each node in the ddCRP (a connected component of the digraph)
 
-        self._C_table_values = np.zeros((0),dtype=int) # observation type for each table: can be UNKNOWN_OBSERVATION
-        self._C_table_counter = 0; # number of tables in use
+            self._C_table_values = np.zeros((0),dtype=int) # observation type for each table: can be UNKNOWN_OBSERVATION
+            self._C_table_counter = 0; # number of tables in use
 
-        self._C_num_labeled_in_table = np.zeros((0),dtype=int) # number of nodes with observations in each table (nodes in final layer that aren't UNKNOWN_OBSERVATION)
-        self._C_num_labeled_upstream = np.zeros((self.N, self.num_layers),dtype=int) # number of observed nodes upstream of each node (inclusive of that node)
+            self._C_num_labeled_in_table = np.zeros((0),dtype=int) # number of nodes with observations in each table (nodes in final layer that aren't UNKNOWN_OBSERVATION)
+            self._C_num_labeled_upstream = np.zeros((self.N, self.num_layers),dtype=int) # number of observed nodes upstream of each node (inclusive of that node)
 
-        # creates Y for each layer
-        # here, Y uses condensed observation indexes: should be 0,..,(M-1) plus any UNKNOWN_OBSERVATION values
-        self._C_y_0 = np.zeros((self.N, self.num_layers), dtype=int)
-        self._C_y_0.fill(hddCRPModel.UNKNOWN_OBSERVATION)
-        for ii,jj in enumerate(self._Y_indicies):
-            self._C_y_0[jj,-1] = ii;
-        self._C_y_0[self._Y_unknowns,-1] = hddCRPModel.UNKNOWN_OBSERVATION
-        self._C_y_0[:,0:-1] = hddCRPModel.UNKNOWN_OBSERVATION
-        self._C_y = np.zeros_like(self._C_y_0);
-        self._C_y.fill(hddCRPModel.UNKNOWN_OBSERVATION);
-    
-        self._CB_y = self._C_y.copy()
-        self._CB_is_cycle = self._C_is_cycle.copy()
-        self._CB_ptr = self._C_ptr.copy()
-        self._CB_table_counter = self._C_table_counter
-        self._CB_tables = self._C_tables.copy()
-        self._CB_table_values = self._C_table_values.copy()
-        self._CB_predecessors = self._C_predecessors.copy()
-        self._CB_num_labeled_in_table = self._C_num_labeled_in_table.copy()
-        self._CB_num_labeled_upstream = self._C_num_labeled_upstream.copy()
+            # creates Y for each layer
+            # here, Y uses condensed observation indexes: should be 0,..,(M-1) plus any UNKNOWN_OBSERVATION values
+            self._C_y_0 = np.zeros((self.N, self.num_layers), dtype=int)
+            self._C_y_0.fill(hddCRPModel.UNKNOWN_OBSERVATION)
+            for ii,jj in enumerate(self._Y_indicies):
+                self._C_y_0[jj,-1] = ii;
+            self._C_y_0[self._Y_unknowns,-1] = hddCRPModel.UNKNOWN_OBSERVATION
+            self._C_y_0[:,0:-1] = hddCRPModel.UNKNOWN_OBSERVATION
+            self._C_y = np.zeros_like(self._C_y_0);
+            self._C_y.fill(hddCRPModel.UNKNOWN_OBSERVATION);
+        
+            self._CB_y = self._C_y.copy()
+            self._CB_is_cycle = self._C_is_cycle.copy()
+            self._CB_ptr = self._C_ptr.copy()
+            self._CB_table_counter = self._C_table_counter
+            self._CB_tables = self._C_tables.copy()
+            self._CB_table_values = self._C_table_values.copy()
+            self._CB_predecessors = self._C_predecessors.copy()
+            self._CB_num_labeled_in_table = self._C_num_labeled_in_table.copy()
+            self._CB_num_labeled_upstream = self._C_num_labeled_upstream.copy()
 
     def _initialize_connections(self, rng : np.random.Generator = None) -> None:
         '''
@@ -637,15 +683,18 @@ class hddCRPModel():
         '''
         self._blank_connection_variables();
 
-        # Connections generated from lowest-depth first (where observations are)
-        self._C_y = self._C_y_0.copy()
-        for layer in range(self.num_layers-1, -1, -1): # for each group
-            cs, YY_current, YY_upper = self._initialize_single_layer_of_connections(self._group_indicies[layer], self._C_y[:,layer], self.alpha[layer], rng=rng);
-            if(layer > 0):
-                self._C_y[:,layer - 1] = YY_upper;
-            self._C_y[:, layer] = YY_current;
-            self._C_ptr[:,layer] = cs;
-            # print("C_y s \n" + str(self._C_y.T))
+        if(self.is_sequential):
+            raise NotImplementedError
+        else:
+            # Connections generated from lowest-depth first (where observations are)
+            self._C_y = self._C_y_0.copy()
+            for layer in range(self.num_layers-1, -1, -1): # for each group
+                cs, YY_current, YY_upper = self._initialize_single_layer_of_connections(self._group_indicies[layer], self._C_y[:,layer], self.alpha[layer], rng=rng);
+                if(layer > 0):
+                    self._C_y[:,layer - 1] = YY_upper;
+                self._C_y[:, layer] = YY_current;
+                self._C_ptr[:,layer] = cs;
+                # print("C_y s \n" + str(self._C_y.T))
 
     def _initialize_predecessors(self):
         '''
@@ -670,11 +719,12 @@ class hddCRPModel():
                      _C_num_labeled_upstream (int array size N x num_layers)
 
         '''
-        for layer in range(self.num_layers-1, -1, -1):
-            for node_from in range(self.N):
-                node_to = self._C_ptr[node_from,layer];
-                if(node_to != node_from): # no self connections
-                    self._C_predecessors[layer][node_to].append(node_from);
+        if(not self.is_sequential):
+            for layer in range(self.num_layers-1, -1, -1):
+                for node_from in range(self.N):
+                    node_to = self._C_ptr[node_from,layer];
+                    if(node_to != node_from): # no self connections
+                        self._C_predecessors[layer][node_to].append(node_from);
 
 
     def _initialize_single_layer_of_connections(self, groups : tuple, YY : ArrayLike, alpha : float, rng : np.random.Generator = None) -> tuple[ArrayLike,ArrayLike]:
@@ -1253,7 +1303,7 @@ class hddCRPModel():
         Assumes connection variables are all setup correctly - does not check! No values in object are modified.
 
         Args:
-          LogBaseMeasyre: (array length M) The log base probability of each observation value. If none given, uses current values.
+          LogBaseMeasure: (array length M) The log base probability of each observation value. If none given, uses current values.
 
         Results:
           log likelihood of the observations occuring at each table.
@@ -1806,6 +1856,7 @@ class hddCRPModel():
         print("C_num_labeled_upstream \n" + str(self._C_num_labeled_upstream.T))
         print("C_num_labeled_in_table \n" + str(self._C_num_labeled_in_table))
         print("C_predecessors \n" + str(self._C_predecessors))
+
 
 class DualAveragingForStepSize():
 
