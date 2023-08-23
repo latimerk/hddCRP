@@ -78,7 +78,7 @@ def uniform_prior_for_maze_task(log_alphas, log_timescales_within_session, log_t
 def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions, log_scales_between_sessions = 0,
                             alpha_shape : float | ArrayLike = 2,  alpha_scale : float | ArrayLike = 10,
                             timescale_between_shape : float | ArrayLike = 2, timescale_between_scale : float | ArrayLike = 10,
-                            timescale_within_shape : float | ArrayLike = 2, timescale_within_scale  : float | ArrayLike = 50,
+                            timescale_within_shape : float | ArrayLike = 2, timescale_within_scale  : float | ArrayLike = 25,
                             scale_between_shape : float | ArrayLike = 2, scale_between_scale : float | ArrayLike = 10):
 
     log_p_alphas = gamma.logpdf(np.exp(log_alphas), alpha_shape,  scale=alpha_scale)
@@ -96,99 +96,6 @@ def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_times
     log_prior = log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_scales_between_session.sum()  + log_p_alphas.sum()
 
     return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas, log_p_scales_between_session
-
-# def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions, log_scales_between_sessions = 0,
-#                             alpha_loc : float | ArrayLike = np.log(25),  alpha_scale : float | ArrayLike = 1.5,
-#                             timescale_within_loc  : float | ArrayLike = np.log(25), timescale_within_scale  : float | ArrayLike = 1.5,
-#                             timescale_between_loc : float | ArrayLike = np.log(5), timescale_between_scale : float | ArrayLike = 1.5,
-#                             scale_between_loc : float | ArrayLike = 0, scale_between_scale : float | ArrayLike = 0.5):
-
-#     log_p_alphas = norm.logpdf(log_alphas, loc=alpha_loc,  scale=alpha_scale)
-
-#     log_p_timescales_within_session = norm.logpdf(log_timescales_within_session, loc=timescale_within_loc,  scale=timescale_within_scale)
-        
-#     log_p_timescales_between_session = norm.logpdf(log_timescales_between_sessions, loc=timescale_between_loc, scale=timescale_between_scale)
-    
-#     log_p_scales_between_session = norm.logpdf(log_scales_between_sessions, loc=scale_between_loc, scale=scale_between_scale)
-
-#     log_prior = log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_scales_between_session.sum()  + log_p_alphas.sum()
-
-#     return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas, log_p_scales_between_session
-          
-# def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions,
-#                             alpha_shape : float | ArrayLike = 3, alpha_scale : float | ArrayLike = 100,
-#                             timescale_within_shape  : float | ArrayLike = 3, timescale_within_scale  : float | ArrayLike = 100,
-#                             timescale_between_shape : float | ArrayLike = 3, timescale_between_scale : float | ArrayLike = 10):
-
-#     if(np.all(alpha_scale==0) and np.all(alpha_shape=0)):
-#         log_p_alphas = np.zeros_like(log_alphas) 
-#     else:
-#         log_p_alphas = invgamma.logpdf(np.exp(log_alphas), alpha_shape, scale=alpha_scale)
-#         log_p_alphas += log_alphas # for the exp/log transform
-
-#     if(np.all(timescale_within_scale==0) and np.all(timescale_within_shape==0)):
-#         log_p_timescales_within_session = np.zeros_like(log_timescales_within_session) 
-#     else:
-#         log_p_timescales_within_session = invgamma.logpdf(np.exp(log_timescales_within_session), timescale_within_shape, scale=timescale_within_scale)
-#         log_p_timescales_within_session += log_timescales_within_session # for the exp/log transform
-        
-#     if(np.all(timescale_between_scale==0) and np.all(timescale_between_shape==0)):
-#         log_p_timescales_between_session = np.zeros_like(log_timescales_between_sessions) 
-#     else:
-#         log_p_timescales_between_session = invgamma.logpdf(np.exp(log_timescales_between_sessions), timescale_between_shape, scale=timescale_between_scale)
-#         log_p_timescales_between_session += log_timescales_between_sessions # for the exp/log transform
-
-#     log_prior = log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_alphas.sum()
-
-#     return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas
-
-
-# def exponential_distance_function_for_maze_task(f, weights, num_within_session_timescales : int = 1):
-#     vv = np.isinf(f)
-#     if(np.all(vv)):
-#         return 0
-#     else:
-#         vv = np.where(~vv)[0][0];
-#         if(vv < num_within_session_timescales):
-#             # within session distance: single decay parameter
-#             timescale = np.exp(weights[vv])
-#             return np.prod(np.exp(-np.abs(f[vv])/timescale))
-#         else:
-#             # a between session distance: two parameters (decay timescale and offset)
-#             timescale = np.exp(weights[vv])
-#             log_mult = weights[2*vv - num_within_session_timescales]
-#             return np.prod(np.exp(-(np.abs(f[vv])/timescale) + log_mult))
-          
-# def log_prior_for_maze_task(alphas, timescales_within_session, timescales_between_sessions, log_mults,
-#                             alpha_shape : float | ArrayLike = 3, alpha_scale : float | ArrayLike = 1000,
-#                             timescale_between_scale : float | ArrayLike = 3, timescale_between_shape : float | ArrayLike = 1000,
-#                             timescale_within_shape  : float | ArrayLike = 3, timescale_within_scale  : float | ArrayLike = 1000,
-#                             log_mult_mean : float | ArrayLike = 0, log_mult_std : float | ArrayLike = 1):
-
-#     log_p_log_mults  = norm.logpdf(log_mults, loc=log_mult_mean, scale=log_mult_std)
-#     if(np.all(alpha_scale==0) and np.all(alpha_shape=0)):
-#         log_p_alphas = np.zeros_like(alphas) 
-#     else:
-#         log_p_alphas = invgamma.logpdf(np.exp(alphas), alpha_shape, scale=alpha_scale)
-#         log_p_alphas += alphas # for the exp/log transform
-
-#     if(np.all(timescale_within_scale==0) and np.all(timescale_within_shape==0)):
-#         log_p_timescales_within_session = np.zeros_like(timescales_within_session) 
-#     else:
-#         log_p_timescales_within_session = invgamma.logpdf(np.exp(timescales_within_session), timescale_within_shape, scale=timescale_within_scale)
-#         log_p_timescales_within_session += timescales_within_session # for the exp/log transform
-        
-#     if(np.all(timescale_between_scale==0) and np.all(timescale_between_shape==0)):
-#         log_p_timescales_between_session = np.zeros_like(timescales_between_sessions) 
-#     else:
-#         log_p_timescales_between_session = invgamma.logpdf(np.exp(timescales_between_sessions), timescale_between_shape, scale=timescale_between_scale)
-#         log_p_timescales_between_session += log_p_timescales_between_session # for the exp/log transform
-
-#     log_prior = log_p_log_mults.sum() + log_p_timescales_within_session.sum() + log_p_timescales_between_session.sum() + log_p_alphas.sum()
-
-#     return log_prior
-
-
 
 
 def exponential_distance_function(f, weights):

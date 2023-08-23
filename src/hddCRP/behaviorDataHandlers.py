@@ -265,7 +265,7 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
     return model
 
 
-def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayLike | float, uniform_prior : bool = True) -> tuple[hddCRPModel, float]:
+def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayLike | float, uniform_prior : bool = False) -> tuple[hddCRPModel, float]:
     '''
     Takes a random-walk Metropolis-Hastings step for the hddCRP model parameters.
     Here, I assume all parameters can take any float value - the prior must do the transform for any constraints.
@@ -340,7 +340,9 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayL
 
     return (hddcrp, log_acceptance_probability, accepted, log_like, log_prior, like_diff, prior_diff)
 
+
 def sample_model_for_maze_data(hddcrp : hddCRPModel, num_samples : int, num_warmup_samples : int, uniform_prior : bool = True, print_every : int = 5000):
+
     num_samples = int(num_samples)
     num_warmup_samples = int(num_warmup_samples)
     assert num_samples > 0, "must sample positive number of values"
