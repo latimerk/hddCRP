@@ -263,7 +263,7 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
     return model
 
 
-def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayLike | float, uniform_prior : bool = False) -> tuple[hddCRPModel, float]:
+def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayLike | float, uniform_prior : bool = False, prior_shapes = None, prior_scales=None) -> tuple[hddCRPModel, float]:
     '''
     Takes a random-walk Metropolis-Hastings step for the hddCRP model parameters.
     Here, I assume all parameters can take any float value - the prior must do the transform for any constraints.
@@ -311,12 +311,19 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayL
     
 
     if(uniform_prior):
-        
         log_P_theta_current, *_ = uniform_prior_for_maze_task(log_alpha_curr, weight_curr[w_idx], weight_curr[b_idx], weight_curr[s_idx]) 
-        log_P_theta_star, *_    = uniform_prior_for_maze_task(log_alpha_star, weight_star[w_idx], weight_star[b_idx], weight_star[s_idx]) 
+        log_P_theta_star, *_    = uniform_prior_for_maze_task(log_alpha_star, weight_star[w_idx], weight_star[b_idx], weight_star[s_idx])  
     else:
-        log_P_theta_current, *_ = log_prior_for_maze_task(log_alpha_curr, weight_curr[w_idx], weight_curr[b_idx], weight_curr[s_idx]) 
-        log_P_theta_star, *_    = log_prior_for_maze_task(log_alpha_star, weight_star[w_idx], weight_star[b_idx], weight_star[s_idx])  
+        if(prior_shapes is None or prior_scales is None):
+            log_P_theta_current, *_ = log_prior_for_maze_task(log_alpha_curr, weight_curr[w_idx], weight_curr[b_idx], weight_curr[s_idx]) 
+            log_P_theta_star, *_    = log_prior_for_maze_task(log_alpha_star, weight_star[w_idx], weight_star[b_idx], weight_star[s_idx]) 
+        else: 
+            log_P_theta_current, *_ = log_prior_for_maze_task(log_alpha_curr, weight_curr[w_idx], weight_curr[b_idx], weight_curr[s_idx], 
+                                        alpha_shape=prior_shapes["alpha"], timescale_within_shape=prior_shapes["tau_within"], timescale_between_shape=prior_shapes["tau_between"], 
+                                        alpha_scale=prior_scales["alpha"], timescale_within_scale=prior_scales["tau_within"], timescale_between_scale=prior_scales["tau_between"]) 
+            log_P_theta_star, *_    = log_prior_for_maze_task(log_alpha_star, weight_star[w_idx], weight_star[b_idx], weight_star[s_idx], 
+                                        alpha_shape=prior_shapes["alpha"], timescale_within_shape=prior_shapes["tau_within"], timescale_between_shape=prior_shapes["tau_between"], 
+                                        alpha_scale=prior_scales["alpha"], timescale_within_scale=prior_scales["tau_within"], timescale_between_scale=prior_scales["tau_between"])   
 
     log_acceptance_probability = min(0.0, log_p_Y_star + log_P_theta_star - (log_p_Y_current + log_P_theta_current))
 
@@ -338,7 +345,7 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayL
 
     return (hddcrp, log_acceptance_probability, accepted, log_like, log_prior, like_diff, prior_diff)
 
-def sample_model_for_maze_data(hddcrp : hddCRPModel, num_samples : int, num_warmup_samples : int, uniform_prior : bool = False, print_every : int = None):
+def sample_model_for_maze_data(hddcrp : hddCRPModel, num_samples : int, num_warmup_samples : int, uniform_prior : bool = False, print_every : int = None, prior_shapes = None, prior_scales=None):
     num_samples = int(num_samples)
     num_warmup_samples = int(num_warmup_samples)
     assert num_samples > 0, "must sample positive number of values"
@@ -363,7 +370,7 @@ def sample_model_for_maze_data(hddcrp : hddCRPModel, num_samples : int, num_warm
             print("Sample " + str(ss) + " / " + str(num_samples_total))
         hddcrp.run_gibbs_sweep()
         sigma2 = step_size_settings.step_size_fixed if ss >= num_warmup_samples else step_size_settings.step_size_for_warmup
-        hddcrp, samples["log_acceptance_probability"][ss], samples["accepted"][ss], samples["log_like"][ss], samples["log_prior"][ss] , samples["log_like_diff"][ss], samples["log_prior_diff"][ss] = Metropolis_Hastings_step_for_maze_data(hddcrp, sigma2, uniform_prior=uniform_prior)
+        hddcrp, samples["log_acceptance_probability"][ss], samples["accepted"][ss], samples["log_like"][ss], samples["log_prior"][ss] , samples["log_like_diff"][ss], samples["log_prior_diff"][ss] = Metropolis_Hastings_step_for_maze_data(hddcrp, sigma2, uniform_prior=uniform_prior, prior_shapes = prior_shapes, prior_scales=prior_shapes)
 
         samples["alphas"][ss,:] = hddcrp.alpha
         samples["log_taus"][ss,:] = hddcrp.weight_params
