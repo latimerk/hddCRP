@@ -196,6 +196,13 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
                                                 sequential_between_session_same_block_distances = True,
                                                 sequential_between_session_different_block_distances = True,
                                                 within_block_distance_in_total_sessions  = True);
+
+
+    D_nonsequential, _ = create_distance_matrix(seqs, session_types, distinct_within_session_distance_params = distinct_within_session_distance_params,
+                                                sequential_within_session_distances = False,
+                                                sequential_between_session_same_block_distances = False,
+                                                sequential_between_session_different_block_distances = True,
+                                                within_block_distance_in_total_sessions  = True);
     
     ## set up parameters in a specific vectorized form
     param_names, params_vector, is_within_timescale, is_between_timescale, is_between_constant_scale, timescale_inds, constant_scale_inds = parameter_vectorizer_for_distance_matrix(variable_names, session_types, within_session_time_constant = within_session_time_constant, between_session_time_constants = between_session_time_constants, between_session_constant_scales = between_session_constant_scales)
@@ -256,17 +263,21 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
             # store observation from final layer
             seqs[ss][tt] = symbols[C_y[tt_ctr, -1]]
             tt_ctr += 1
-    C = {'C_y' : C_y, 'F' : F, 'D' : D, 'C_ptr' : C_ptr, 'C_ctx' : C_ctx, 
+    C = {'C_y' : C_y, 'F' : F, 'D' : D, 'C_ptr' : C_ptr, 'C_ctx' : C_ctx, "D_nonsequential" : D_nonsequential,
          'session_lengths' : session_length, "symbols" : symbols, "alphas" : alphas, "base_measure" : base_measure, 
          "param_vector" : params_vector, "param_names" : param_names, "variable_names" : variable_names, "param_types" : param_types}
     return (seqs, C)
 
-def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, rng : np.random.Generator = None, use_real_connections=True):
+def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, rng : np.random.Generator = None, use_real_connections=True, use_nonsequential_filter_model=False):
     depth = C["alphas"].size
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
+    block_ends = np.cumsum(np.array([np.size(ss) for ss in seqs],dtype=int))-1
     groupings = create_context_tree(seqs, depth=depth)
 
-    D_0 = C["D"];
+    if(use_nonsequential_filter_model):
+        D_0 = C["D_nonsequential"]
+    else:
+        D_0 = C["D"];
     D = np.min(D_0, axis=2)
     inds = np.argmin(D_0, axis=2)
     inds[np.isinf(D)] = -1
@@ -296,6 +307,10 @@ def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, rng : np.random
                         complete_weight_func=complete_weight_func, 
                         weight_param_labels=C["param_names"])
     model._param_types = C["param_types"]
+    model._weight_function_setup = {"inds":inds,
+                                    "timescale_inds":timescale_inds,
+                                    "constant_scale_inds":constant_scale_inds}
+    model._block_ends = block_ends
     if(use_real_connections):
         model._blank_connection_variables()
         model._C_ptr[:,:] = C["C_ptr"]

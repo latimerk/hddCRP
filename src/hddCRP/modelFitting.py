@@ -33,7 +33,8 @@ def exponential_distance_function_for_maze_task(f, weights):
     
 def complete_exponential_distance_function_for_maze_task(d, log_params, inds, timescale_inds, log_scale_inds):
     params = np.exp(log_params)
-    d = d.squeeze()
+    if(np.ndim(d) == 3):
+        d = d.squeeze(axis=2)
     F = np.zeros_like(d,dtype=float);
     for ii in range(timescale_inds.size):
         if(log_scale_inds[ii] >= 0):
@@ -73,7 +74,7 @@ def uniform_prior_for_maze_task(log_alphas, log_timescales_within_session, log_t
     return log_prior, log_p_timescales_within_session, log_p_timescales_between_session, log_p_alphas, log_p_scales_between_session
 
 
-def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions, log_scales_between_sessions = 0,
+def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions, log_scales_between_sessions = [],
                             alpha_shape : float | ArrayLike = 2,  alpha_scale : float | ArrayLike = 10,
                             timescale_between_shape : float | ArrayLike = 2, timescale_between_scale : float | ArrayLike = 10,
                             timescale_within_shape : float | ArrayLike = 2, timescale_within_scale  : float | ArrayLike = 25,
@@ -1170,7 +1171,7 @@ class hddCRPModel():
         if(alphas is None):
             alphas = self.alpha
         else:
-            if(np.isscalar(alphas)):
+            if(np.isscalar(alphas) or np.size(alphas)==1):
                 alphas = np.ones((self.num_layers))*alphas;
             else:
                 alphas = np.array(alphas).flatten()
