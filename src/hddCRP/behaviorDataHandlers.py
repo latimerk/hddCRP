@@ -333,6 +333,86 @@ def compute_transition_probs(model : hddCRPModel,  weights, g_nums):
 
     return ps
 
+def compute_kl_diveregences_between_transition_probabilities(probs_1, probs_2, contexts_1, contexts_2):
+    '''
+    Args:
+        probs_1: (samples x M x len(contexts_1) x number of points)
+        probs_2: (samples x M x len(contexts_2) x number of points)
+
+    Returns
+        (divergences, contexts)
+
+        divegences: (array) samples X [KL(deep context || shallow context), KL(shallow context || deep context), JS(shallow context, deep context)] x len(contexts) x number of points
+        contexts: list of tuples of string pairs for the contexts. (shallow context, deep context)
+    '''
+    if(probs_1.ndim == 3):
+        probs_1 = probs_1[:,:,:,np.newaxis]
+    if(probs_2.ndim == 3):
+        probs_2 = probs_2[:,:,:,np.newaxis]
+    assert probs_1.ndim == 4, "probs_1 should have 4 dimensions"
+    assert probs_2.ndim == 4, "probs_2 should have 4 dimensions"
+    assert probs_1.shape[0] == probs_2.shape[0], "probs_1.shape[0] must equal probs_2.shape[0] (this requirement could be loosened)"
+    assert probs_1.shape[1] == probs_2.shape[1], "probs_1.shape[1] must equal probs_2.shape[1]"
+    assert probs_1.shape[3] == probs_2.shape[3], "probs_1.shape[3] must equal probs_2.shape[3]"
+    assert probs_1.shape[2] == len(contexts_1), "probs_1.shape[2] doesn't match len(context_1)"
+    assert probs_2.shape[2] == len(contexts_2), "probs_2.shape[2] doesn't match len(context_2)"
+
+    contexts_1 = [[x for x in cc.split('-') if x != ''] for cc in contexts_1]
+    contexts_2 = [[x for x in cc.split('-') if x != ''] for cc in contexts_2]
+
+    assert np.all([len(xx) == len(contexts_1[0]) for xx in contexts_1]), "contexts_1 must all be of same depth"
+    assert np.all([len(xx) == len(contexts_2[0]) for xx in contexts_2]), "contexts_2 must all be of same depth"
+
+    # match up the contexts
+    if(len(contexts_1[0]) < len(contexts_2[0])):
+        contexts_short = contexts_1;
+        contexts_long = contexts_2;
+
+        probs_short = probs_1;
+        probs_long = probs_2;
+    else:
+        contexts_short = contexts_2;
+        contexts_long = contexts_1;
+
+        probs_short = probs_2;
+        probs_long = probs_1;
+
+    num_contexts = len(contexts_long)
+    short_context_indices = np.zeros((num_contexts),dtype=int)
+    for ii_i, ii in enumerate(contexts_long):
+        match_index = -1;
+        for jj_i, jj in enumerate(contexts_short):
+            if(jj == ii[:len(jj)]):
+                match_index = jj_i
+                break
+        if(match_index < 0):
+            raise RuntimeError("No matching contexts found")
+        short_context_indices[ii_i] = match_index;
+
+    num_obs = probs_1.shape[3]
+    context_strs = []
+    divs = np.zeros((probs_short.shape[0], 3, num_contexts, num_obs))
+    for jj in range(num_obs):
+        for ii in range(num_contexts):
+            ii_short = short_context_indices[ii];
+
+            P = probs_long[:,:,ii,jj];
+            Q = probs_short[:,:,ii_short,jj];
+            M = 0.5*(P + Q)
+
+            lP = np.log(P)
+            lQ = np.log(Q)
+            lM = np.log(M)
+
+            divs[:, 0, ii, jj] = np.sum(P * (lP - lQ), axis=1)
+            divs[:, 1, ii, jj] = np.sum(Q * (lQ - lP), axis=1)
+            divs[:, 2, ii, jj] = 0.5*(np.sum(P * (lP - lM), axis=1) + np.sum(Q * (lQ - lM), axis=1))
+
+            context_strs.append(('-'.join(contexts_short[ii_short]), '-'.join(contexts_long[ii])))
+
+    return divs, context_strs, short_context_indices
+
+    
 
 def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayLike | float, uniform_prior : bool = False, 
         prior_shapes = None, prior_scales=None, single_concentration_parameter=False) -> tuple[hddCRPModel, float]:
@@ -460,7 +540,7 @@ def sample_model_for_maze_data(hddcrp : hddCRPModel, num_samples : int, num_warm
 
     
     for ss in range(num_samples_total):
-        if(ss % print_every == 0):
+        if((not print_every is None) and (ss % print_every == 0)):
             print("Sample " + str(ss) + " / " + str(num_samples_total))
         hddcrp.run_gibbs_sweep()
         sigma2 = step_size_settings.step_size_fixed if ss >= num_warmup_samples else step_size_settings.step_size_for_warmup
