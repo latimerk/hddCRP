@@ -44,6 +44,14 @@ def complete_exponential_distance_function_for_maze_task(d, log_params, inds, ti
         F[inds == ii] = np.exp(-np.abs(d[inds == ii])/params[timescale_inds[ii]] + log_scale)
     return F
 
+def complete_constant_distance_function_for_maze_task(d, log_params):
+    if(np.ndim(d) == 3):
+        d = d.squeeze(axis=2)
+    F = np.ones_like(d,dtype=float);
+    F[np.isinf(d) | np.isnan(d)] = 0;
+    return F
+
+
 def uniform_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions, log_scales_between_sessions = 0,
                             log_alpha_min : float = -np.inf, log_alpha_max : float = np.log(1000),
                             log_timescale_within_min  : float | ArrayLike = -np.inf, log_timescale_within_max  : float | ArrayLike = np.log(1000),
@@ -76,7 +84,7 @@ def uniform_prior_for_maze_task(log_alphas, log_timescales_within_session, log_t
 
 def log_prior_for_maze_task(log_alphas, log_timescales_within_session, log_timescales_between_sessions, log_scales_between_sessions = [],
                             alpha_shape : float | ArrayLike = 2,  alpha_scale : float | ArrayLike = 5,
-                            timescale_between_shape : float | ArrayLike = 2, timescale_between_scale : float | ArrayLike = 5,
+                            timescale_between_shape : float | ArrayLike = 2, timescale_between_scale : float | ArrayLike = 10,
                             timescale_within_shape : float | ArrayLike = 2, timescale_within_scale  : float | ArrayLike = 25,
                             scale_between_shape : float | ArrayLike = 2, scale_between_scale : float | ArrayLike = 1):
 

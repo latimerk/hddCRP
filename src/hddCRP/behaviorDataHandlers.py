@@ -5,7 +5,7 @@ from itertools import product
 
 from hddCRP.modelFitting import hddCRPModel
 from hddCRP.modelFitting import DualAveragingForStepSize
-from hddCRP.modelFitting import exponential_distance_function_for_maze_task, log_prior_for_maze_task, complete_exponential_distance_function_for_maze_task, uniform_prior_for_maze_task
+from hddCRP.modelFitting import exponential_distance_function_for_maze_task, log_prior_for_maze_task, complete_constant_distance_function_for_maze_task, complete_exponential_distance_function_for_maze_task, uniform_prior_for_maze_task
 
 
 EMPTY_INDICATOR = "NULL"
@@ -227,7 +227,7 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
 
 # TODO: Function to take a set of sessions and return a hddCRPModel
 def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = None,
-        weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None, sequential_distances_only : bool = True ):
+        weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None, sequential_distances_only : bool = True, include_timescales=True ):
 
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
     block_ends = np.cumsum(np.array([np.size(ss) for ss in seqs],dtype=int))-1
@@ -239,26 +239,39 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
                                                 sequential_between_session_different_block_distances = sequential_distances_only,
                                                 within_block_distance_in_total_sessions  = True);
 
-    param_names, params_vector, is_within_timescale, is_between_timescale, is_between_constant_scale, timescale_inds, constant_scale_inds = parameter_vectorizer_for_distance_matrix(distance_labels, np.unique(block_ids))
-    param_types = {"is_within_timescale" : is_within_timescale, "is_between_timescale" : is_between_timescale, "is_between_constant_scale" : is_between_constant_scale}
-
-    if(not weight_params_0 is None):
-        params_vector[:] = weight_params_0
-    else:
-        params_vector[0]  = rng.gamma(shape=2, scale=20, size=(1))
-        params_vector[1:] = rng.gamma(shape=2, scale=10, size=(len(params_vector)-1))
-
     if(alpha_0 is None):
         alpha_0 = rng.gamma(shape=2, scale=10, size=(depth))
-    
-    weight_func = lambda xx,yy : exponential_distance_function_for_maze_task(xx, yy)
+    if(include_timescales):
+        param_names, params_vector, is_within_timescale, is_between_timescale, is_between_constant_scale, timescale_inds, constant_scale_inds = parameter_vectorizer_for_distance_matrix(distance_labels, np.unique(block_ids))
+        param_types = {"is_within_timescale" : is_within_timescale, "is_between_timescale" : is_between_timescale, "is_between_constant_scale" : is_between_constant_scale}
 
-    D = np.min(D_0, axis=2)
-    inds = np.argmin(D_0, axis=2)
-    inds[np.isinf(D)] = -1
+        if(not weight_params_0 is None):
+            params_vector[:] = weight_params_0
+        else:
+            params_vector[0]  = rng.gamma(shape=2, scale=20, size=(1))
+            params_vector[1:] = rng.gamma(shape=2, scale=10, size=(len(params_vector)-1))
+
+        
+        weight_func = lambda xx,yy : exponential_distance_function_for_maze_task(xx, yy)
+
+        D = np.min(D_0, axis=2)
+        inds = np.argmin(D_0, axis=2)
+        inds[np.isinf(D)] = -1
 
 
-    complete_weight_func = lambda d, log_timescales : complete_exponential_distance_function_for_maze_task(d, log_timescales, inds, timescale_inds,constant_scale_inds)
+        complete_weight_func = lambda d, log_timescales : complete_exponential_distance_function_for_maze_task(d, log_timescales, inds, timescale_inds,constant_scale_inds)
+
+    else:
+        complete_weight_func = lambda d, log_timescales : complete_constant_distance_function_for_maze_task(d, log_timescales)
+
+        inds = np.array([],dtype=int);
+        timescale_inds = np.array([],dtype=int);
+        constant_scale_inds = np.array([],dtype=int);
+        D = np.min(D_0, axis=2)
+
+        param_types = {"is_within_timescale" : np.array([],dtype=bool), "is_between_timescale" : np.array([],dtype=bool), "is_between_constant_scale" : np.array([],dtype=bool)}
+        param_names = []
+        params_vector = np.array([])
 
     model = hddCRPModel(Y, groupings, alpha_0, D,
                        weight_params=np.log(params_vector), weight_func=None, weight_param_labels=param_names, complete_weight_func=complete_weight_func, rng=rng)
@@ -289,11 +302,15 @@ def setup_transition_probability_computations(model, observation_indices=None):
         observation_indices = model._block_ends;
     n_obs = np.size(observation_indices)
     D_new = np.array(model._D[observation_indices,:,:].reshape((n_obs,model.N,1)))
-    inds_new = model._weight_function_setup["inds"][observation_indices,:].reshape((n_obs,model.N))
-    D_new[inds_new == 0] += 1
 
-    weights = complete_exponential_distance_function_for_maze_task(D_new, model.weight_params, inds_new, model._weight_function_setup["timescale_inds"],model._weight_function_setup["constant_scale_inds"])
+    if(np.size(model._weight_function_setup["inds"]) > 0):
+        inds_new = model._weight_function_setup["inds"][observation_indices,:].reshape((n_obs,model.N))
+        D_new[inds_new == 0] += 1
 
+        weights = complete_exponential_distance_function_for_maze_task(D_new, model.weight_params, inds_new, model._weight_function_setup["timescale_inds"],model._weight_function_setup["constant_scale_inds"])
+    else:
+        weights = complete_constant_distance_function_for_maze_task(D_new, model.weight_params)
+    
 
     return weights, contexts, groups_numbers_each_level, observation_indices
 
@@ -333,7 +350,7 @@ def compute_transition_probs(model : hddCRPModel,  weights, g_nums):
 
     return ps
 
-def compute_kl_diveregences_between_transition_probabilities(probs_1, probs_2, contexts_1, contexts_2):
+def compute_kl_diveregences_between_transition_probabilities(probs_1, probs_2, contexts_1, contexts_2,rng=None):
     '''
     Args:
         probs_1: (samples x M x len(contexts_1) x number of points)
@@ -351,14 +368,24 @@ def compute_kl_diveregences_between_transition_probabilities(probs_1, probs_2, c
         probs_2 = probs_2[:,:,:,np.newaxis]
     assert probs_1.ndim == 4, "probs_1 should have 4 dimensions"
     assert probs_2.ndim == 4, "probs_2 should have 4 dimensions"
-    assert probs_1.shape[0] == probs_2.shape[0], "probs_1.shape[0] must equal probs_2.shape[0] (this requirement could be loosened)"
+    # assert probs_1.shape[0] == probs_2.shape[0], "probs_1.shape[0] must equal probs_2.shape[0] (this requirement could be loosened)"
     assert probs_1.shape[1] == probs_2.shape[1], "probs_1.shape[1] must equal probs_2.shape[1]"
     assert probs_1.shape[3] == probs_2.shape[3], "probs_1.shape[3] must equal probs_2.shape[3]"
     assert probs_1.shape[2] == len(contexts_1), "probs_1.shape[2] doesn't match len(context_1)"
     assert probs_2.shape[2] == len(contexts_2), "probs_2.shape[2] doesn't match len(context_2)"
 
+    if(rng is None):
+        rng = np.random.default_rng();
+    if(probs_1.shape[0] < probs_2.shape[0]):
+        probs_1 = probs_1[rng.integers(0, probs_1.shape[0],probs_2.shape[0]), :, : ,:]
+    elif(probs_1.shape[0] > probs_2.shape[0]):
+        probs_2 = probs_2[rng.integers(0, probs_2.shape[0],probs_1.shape[0]), :, : ,:]
+
+
+
     contexts_1 = [[x for x in cc.split('-') if x != ''] for cc in contexts_1]
     contexts_2 = [[x for x in cc.split('-') if x != ''] for cc in contexts_2]
+
 
     assert np.all([len(xx) == len(contexts_1[0]) for xx in contexts_1]), "contexts_1 must all be of same depth"
     assert np.all([len(xx) == len(contexts_2[0]) for xx in contexts_2]), "contexts_2 must all be of same depth"
@@ -376,13 +403,15 @@ def compute_kl_diveregences_between_transition_probabilities(probs_1, probs_2, c
 
         probs_short = probs_2;
         probs_long = probs_1;
+    print(contexts_short)
+    print(contexts_long)
 
     num_contexts = len(contexts_long)
     short_context_indices = np.zeros((num_contexts),dtype=int)
     for ii_i, ii in enumerate(contexts_long):
         match_index = -1;
         for jj_i, jj in enumerate(contexts_short):
-            if(jj == ii[:len(jj)]):
+            if((len(jj) == 0) or (jj == ii[-len(jj):])):
                 match_index = jj_i
                 break
         if(match_index < 0):
@@ -408,7 +437,7 @@ def compute_kl_diveregences_between_transition_probabilities(probs_1, probs_2, c
             divs[:, 1, ii, jj] = np.sum(Q * (lQ - lP), axis=1)
             divs[:, 2, ii, jj] = 0.5*(np.sum(P * (lP - lM), axis=1) + np.sum(Q * (lQ - lM), axis=1))
 
-            context_strs.append(('-'.join(contexts_short[ii_short]), '-'.join(contexts_long[ii])))
+            context_strs.append(('-'.join(contexts_short[ii_short]) + "-", '-'.join(contexts_long[ii]) + "-"))
 
     return divs, context_strs, short_context_indices
 
