@@ -487,20 +487,26 @@ class sequentialhddCRPModel():
         prob_group_same_obs = self._compute_sum_prob_group_same_observation(F, predictive=True)
         
         num_contexts = len(self._predictive_transition_probability_setup["contexts"])
-        P_jumped = np.ones((num_contexts))
+        log_P_jumped = np.zeros((num_contexts))
 
-        P_obs = np.zeros((num_contexts, self.M))
+        log_P_obs = np.zeros((num_contexts, self.M, self.num_layers))
 
         for layer in range(self.num_layers,0,-1):
-            n = (alphas[layer] + prob_group[:,layer]);
-            P_obs += P_jumped * (prob_group_same_obs[:,layer,:].squeeze(axis=1))#/n[:,np.newaxis]
-            P_jumped *= alphas[layer]/n;
+            # n = (alphas[layer] + prob_group[:,layer]);
+            log_n = (alphas[layer] + prob_group[:,layer]);
+            #P_obs += P_jumped * (prob_group_same_obs[:,layer,:].squeeze(axis=1))/n[:,np.newaxis]
+            log_P_obs[:,:,layer] = log_P_jumped  + np.log(prob_group_same_obs[:,layer,:].squeeze(axis=1)) - log_n[:,np.newaxis]
+            # P_jumped *= alphas[layer]/n;
+            log_P_jumped += np.log(alphas[layer]) - log_n;
         layer = 0;
-        n = (alphas[layer] + prob_group[:,layer]);
-        
-        P_obs += P_jumped * (prob_group_same_obs[:,layer,:].squeeze(axis=1) + alphas[layer]*self.BaseMeasure[np.newaxis,:])#/n[:,np.newaxis]
-
-        P_obs = P_obs / np.sum(P_obs,axis=1)
+        # n = (alphas[layer] + prob_group[:,layer]);
+        # P_obs += P_jumped * (prob_group_same_obs[:,layer,:].squeeze(axis=1) + alphas[layer]*self.BaseMeasure[np.newaxis,:])/n[:,np.newaxis]
+        # P_obs = P_obs / np.sum(P_obs,axis=1)
+        log_n = np.log_(alphas[layer] + prob_group[:,layer]);
+        log_P_obs[:,:,layer] = log_P_jumped  + np.log(prob_group_same_obs[:,layer,:].squeeze(axis=1) + alphas[layer]*self.BaseMeasure[np.newaxis,:]) - log_n[:,np.newaxis]
+        log_P_obs = logsumexp(log_P_obs,axis=2)
+        log_P_obs -= logsumexp(log_P_obs,axis=1)
+        P_obs = np.exp(log_P_obs )
         return P_obs
     
     def compute_preditive_transition_probabilities_markov(self, layer : int, alpha : float = 0):
