@@ -563,7 +563,12 @@ class sequentialhddCRPModel():
                 bm = alphas[layer]*self.BaseMeasure[np.newaxis,:,np.newaxis]
             else:
                 bm = 0
-            log_P_obs[:,:,layer,:] = log_P_jumped  + np.log(prob_group_same_obs[:,layer,:,:] + bm) - log_n
+
+            lp = prob_group_same_obs[:,layer,:,:] + bm;
+            cc = lp > 0
+            lp[cc] = np.log(lp[cc]) - log_n(cc)
+            lp[~cc] = ~np.inf
+            log_P_obs[:,:,layer,:] = log_P_jumped  + lp
             log_P_jumped += np.log(alphas[layer]) - log_n;
 
         log_P_obs = logsumexp(log_P_obs,axis=2)
