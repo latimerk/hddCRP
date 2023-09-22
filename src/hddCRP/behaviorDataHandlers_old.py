@@ -3,9 +3,9 @@ from numpy.typing import ArrayLike
 from typing import Callable
 from itertools import product
 
-from hddCRP.modelFittingSequential import sequentialhddCRPModel
+from hddCRP.modelFitting import hddCRPModel
 from hddCRP.modelFitting import DualAveragingForStepSize
-from hddCRP.modelFitting import log_prior_for_maze_task, complete_constant_distance_function_for_maze_task, complete_exponential_distance_function_for_maze_task
+from hddCRP.modelFitting import exponential_distance_function_for_maze_task, log_prior_for_maze_task, complete_constant_distance_function_for_maze_task, complete_exponential_distance_function_for_maze_task, uniform_prior_for_maze_task
 
 
 EMPTY_INDICATOR = "NULL"
@@ -228,8 +228,7 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
 # TODO: Function to take a set of sessions and return a hddCRPModel
 def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = None,
         weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None, sequential_distances_only : bool = True, include_timescales=True ):
-    if(not sequential_distances_only):
-        raise NotImplementedError("Sequential distances only in this model")
+
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
     block_ends = np.cumsum(np.array([np.size(ss) for ss in seqs],dtype=int))-1
     groupings = create_context_tree(seqs, depth=depth)
@@ -252,6 +251,9 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
             params_vector[0]  = rng.gamma(shape=2, scale=20, size=(1))
             params_vector[1:] = rng.gamma(shape=2, scale=10, size=(len(params_vector)-1))
 
+        
+        weight_func = lambda xx,yy : exponential_distance_function_for_maze_task(xx, yy)
+
         D = np.min(D_0, axis=2)
         inds = np.argmin(D_0, axis=2)
         inds[np.isinf(D)] = -1
@@ -271,8 +273,8 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
         param_names = []
         params_vector = np.array([])
 
-    model = sequentialhddCRPModel(Y, groupings, alpha_0, D,
-                       weight_params=np.log(params_vector),  weight_param_labels=param_names, weight_func=complete_weight_func, rng=rng)
+    model = hddCRPModel(Y, groupings, alpha_0, D,
+                       weight_params=np.log(params_vector), weight_func=None, weight_param_labels=param_names, complete_weight_func=complete_weight_func, rng=rng)
     model._param_types = param_types
     model._weight_function_setup = {"inds":inds,
                                     "timescale_inds":timescale_inds,
@@ -280,7 +282,7 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
     model._block_ends = block_ends
     return model
 
-def setup_transition_probability_computations(model : sequentialhddCRPModel, observation_indices=None):
+def setup_transition_probability_computations(model, observation_indices=None):
     prefixes = [str(xx) + '-' for xx in np.unique(model._Y)]
     combinations = list(product(prefixes,repeat=model.num_layers-1))
 
@@ -288,6 +290,10 @@ def setup_transition_probability_computations(model : sequentialhddCRPModel, obs
     groups_at_each_level[0] = ['' for xx in combinations]
     for ii in range(1,model.num_layers):
         groups_at_each_level[ii] = [''.join(xx[-ii:]) for xx in combinations]
+
+    groups_numbers_each_level = [[]] * model.num_layers # layer x contexts
+    for ii in range(0,model.num_layers):
+        groups_numbers_each_level[ii] = [int(model._groupings_compact[model._groupings[:,ii] == xx,ii][0]) if np.any(np.isin(xx,model._groupings[:,ii])) else model.num_groups[ii] for xx in groups_at_each_level[ii]]
 
     contexts = [''.join(xx) for xx in combinations]
 
@@ -301,13 +307,47 @@ def setup_transition_probability_computations(model : sequentialhddCRPModel, obs
         inds_new = model._weight_function_setup["inds"][observation_indices,:].reshape((n_obs,model.N))
         D_new[inds_new == 0] += 1
 
-        weight_func = lambda weight_params : complete_exponential_distance_function_for_maze_task(D_new, weight_params, inds_new, model._weight_function_setup["timescale_inds"],model._weight_function_setup["constant_scale_inds"])
+        weights_func = lambda weight_params : complete_exponential_distance_function_for_maze_task(D_new, weight_params, inds_new, model._weight_function_setup["timescale_inds"],model._weight_function_setup["constant_scale_inds"])
     else:
-        weight_func = lambda weight_params : complete_constant_distance_function_for_maze_task(D_new, weight_params)
+        weights_func = lambda weight_params : complete_constant_distance_function_for_maze_task(D_new, weight_params)
     
-    model.setup_transition_probability_computations(groups_at_each_level, weight_func)
-    return model, contexts, observation_indices
+    return weights_func, contexts, groups_numbers_each_level, observation_indices
 
+def compute_single_layer_probs(model : hddCRPModel,  weights, layer):
+    nc = np.bincount(model._groupings_compact[:,layer], weights=weights)+model.alpha[layer]
+    ps = np.zeros(model.M);
+
+    unlabeled_table_weights = np.bincount(model._groupings_compact[:,layer], weights=weights*(model._C_y[:,layer]==hddCRPModel.UNKNOWN_OBSERVATION));
+
+    if(layer == 0):
+        unlabeled_table_weights += model.alpha[layer];
+        p_up = 0;
+    else:
+        p_up = model.alpha[layer]/nc;
+        p_up = np.concatenate([p_up, [1]])
+
+    ps = np.zeros((model.M, model.num_groups[layer]))
+    for ii in range(model.M):
+        ps[ii,:] = np.bincount(model._groupings_compact[:,layer], weights=weights*(model._C_y[:,layer]==ii)) + unlabeled_table_weights*model.BaseMeasure[ii]
+
+    ps /= nc[np.newaxis,:]
+    ps = np.concatenate([ps, model.BaseMeasure[:,np.newaxis]],axis=1)
+    
+    return (ps, p_up)
+
+def compute_transition_probs(model : hddCRPModel,  weights, g_nums):
+    grp_ps_0, _ = compute_single_layer_probs(model,  weights.squeeze(), 0)
+    ps = grp_ps_0[:,g_nums[0]] 
+
+    for layer_num in range(1, model.num_layers):
+        grp_ps_l, p_up_l = compute_single_layer_probs(model,  weights.squeeze(), layer_num)
+
+        ps_current_layer = grp_ps_l[:,g_nums[layer_num]] 
+        ps_upper = p_up_l[np.newaxis, g_nums[layer_num]] * ps
+
+        ps = ps_current_layer + ps_upper
+
+    return ps
 
 def compute_kl_diveregences_between_transition_probabilities(probs_1, probs_2, contexts_1, contexts_2,rng=None):
     '''
@@ -362,7 +402,9 @@ def compute_kl_diveregences_between_transition_probabilities(probs_1, probs_2, c
 
         probs_short = probs_2;
         probs_long = probs_1;
-    
+    # print(contexts_short)
+    # print(contexts_long)
+
     num_contexts = len(contexts_long)
     short_context_indices = np.zeros((num_contexts),dtype=int)
     for ii_i, ii in enumerate(contexts_long):
@@ -400,8 +442,8 @@ def compute_kl_diveregences_between_transition_probabilities(probs_1, probs_2, c
 
     
 
-def Metropolis_Hastings_step_for_maze_data(hddcrp : sequentialhddCRPModel, sigma2 : ArrayLike | float, uniform_prior : bool = False, 
-        prior_shapes = None, prior_scales=None, single_concentration_parameter=False) -> tuple[sequentialhddCRPModel, float]:
+def Metropolis_Hastings_step_for_maze_data(hddcrp : hddCRPModel, sigma2 : ArrayLike | float, uniform_prior : bool = False, 
+        prior_shapes = None, prior_scales=None, single_concentration_parameter=False) -> tuple[hddCRPModel, float]:
     '''
     Takes a random-walk Metropolis-Hastings step for the hddCRP model parameters.
     Here, I assume all parameters can take any float value - the prior must do the transform for any constraints.
@@ -489,7 +531,9 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : sequentialhddCRPModel, sigma
     return (hddcrp, log_acceptance_probability, accepted, log_like, log_prior, like_diff, prior_diff)
 
 
-def sample_model_for_maze_data(hddcrp : sequentialhddCRPModel, num_samples : int, num_warmup_samples : int,
+
+
+def sample_model_for_maze_data(hddcrp : hddCRPModel, num_samples : int, num_warmup_samples : int,
             uniform_prior : bool = False, print_every : int = None, prior_shapes = None, prior_scales=None, single_concentration_parameter=False,
             compute_transition_probabilties=True):
     num_samples = int(num_samples)
@@ -505,7 +549,8 @@ def sample_model_for_maze_data(hddcrp : sequentialhddCRPModel, num_samples : int
         hddcrp.alpha = hddcrp.alpha[0];
 
     if(compute_transition_probabilties):
-        hddcrp, contexts, observation_indices = setup_transition_probability_computations(hddcrp)
+        weights_func, contexts, groups_numbers_each_level, observation_indices = setup_transition_probability_computations(hddcrp)
+
         transition_probabilities = { "contexts" : contexts,
             "observation_indices" : observation_indices,
             "probabilities" : np.zeros((num_samples_total, hddcrp.M, len(contexts), len(observation_indices)))
@@ -525,6 +570,7 @@ def sample_model_for_maze_data(hddcrp : sequentialhddCRPModel, num_samples : int
     for ss in range(num_samples_total):
         if((not print_every is None) and (ss % print_every == 0)):
             print("Sample " + str(ss) + " / " + str(num_samples_total))
+        hddcrp.run_gibbs_sweep()
         sigma2 = step_size_settings.step_size_fixed if ss >= num_warmup_samples else step_size_settings.step_size_for_warmup
         hddcrp, samples["log_acceptance_probability"][ss], samples["accepted"][ss], samples["log_like"][ss], samples["log_prior"][ss] , samples["log_like_diff"][ss], samples["log_prior_diff"][ss] = Metropolis_Hastings_step_for_maze_data(hddcrp, sigma2, uniform_prior=uniform_prior, prior_shapes = prior_shapes, prior_scales=prior_scales, single_concentration_parameter=single_concentration_parameter)
 
@@ -532,7 +578,9 @@ def sample_model_for_maze_data(hddcrp : sequentialhddCRPModel, num_samples : int
         samples["log_taus"][ss,:] = hddcrp.weight_params
 
         if(compute_transition_probabilties):
-            transition_probabilities["probabilities"][ss,:,:,:] = hddcrp.compute_preditive_transition_probabilities()
+            weights = weights_func(hddcrp.weight_params);
+            for ii in range(len(observation_indices)):
+                transition_probabilities["probabilities"][ss,:,:,ii] = compute_transition_probs(hddcrp,  weights[ii,:], groups_numbers_each_level)
 
         if(ss < num_warmup_samples):
             step_size_settings.update(np.exp(samples["log_acceptance_probability"][ss]))
