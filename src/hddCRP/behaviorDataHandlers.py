@@ -291,7 +291,7 @@ def setup_transition_probability_computations(model, observation_indices=None):
     for ii in range(1,model.num_layers):
         groups_at_each_level[ii] = [''.join(xx[-ii:]) for xx in combinations]
 
-    groups_numbers_each_level = [[]] * model.num_layers
+    groups_numbers_each_level = [[]] * model.num_layers # layer x contexts
     for ii in range(0,model.num_layers):
         groups_numbers_each_level[ii] = [int(model._groupings_compact[model._groupings[:,ii] == xx,ii][0]) if np.any(np.isin(xx,model._groupings[:,ii])) else model.num_groups[ii] for xx in groups_at_each_level[ii]]
 
@@ -307,12 +307,11 @@ def setup_transition_probability_computations(model, observation_indices=None):
         inds_new = model._weight_function_setup["inds"][observation_indices,:].reshape((n_obs,model.N))
         D_new[inds_new == 0] += 1
 
-        weights = complete_exponential_distance_function_for_maze_task(D_new, model.weight_params, inds_new, model._weight_function_setup["timescale_inds"],model._weight_function_setup["constant_scale_inds"])
+        weights_func = lambda weight_params : complete_exponential_distance_function_for_maze_task(D_new, weight_params, inds_new, model._weight_function_setup["timescale_inds"],model._weight_function_setup["constant_scale_inds"])
     else:
-        weights = complete_constant_distance_function_for_maze_task(D_new, model.weight_params)
+        weights_func = lambda weight_params : complete_constant_distance_function_for_maze_task(D_new, weight_params)
     
-
-    return weights, contexts, groups_numbers_each_level, observation_indices
+    return weights_func, contexts, groups_numbers_each_level, observation_indices
 
 def compute_single_layer_probs(model : hddCRPModel,  weights, layer):
     nc = np.bincount(model._groupings_compact[:,layer], weights=weights)+model.alpha[layer]
@@ -403,8 +402,8 @@ def compute_kl_diveregences_between_transition_probabilities(probs_1, probs_2, c
 
         probs_short = probs_2;
         probs_long = probs_1;
-    print(contexts_short)
-    print(contexts_long)
+    # print(contexts_short)
+    # print(contexts_long)
 
     num_contexts = len(contexts_long)
     short_context_indices = np.zeros((num_contexts),dtype=int)
@@ -550,11 +549,11 @@ def sample_model_for_maze_data(hddcrp : hddCRPModel, num_samples : int, num_warm
         hddcrp.alpha = hddcrp.alpha[0];
 
     if(compute_transition_probabilties):
-        weights, contexts, groups_numbers_each_level, observation_indices = setup_transition_probability_computations(hddcrp)
+        weights_func, contexts, groups_numbers_each_level, observation_indices = setup_transition_probability_computations(hddcrp)
 
         transition_probabilities = { "contexts" : contexts,
             "observation_indices" : observation_indices,
-            "probabilities" : np.zeros((num_samples_total,hddcrp.M, len(contexts), len(observation_indices)))
+            "probabilities" : np.zeros((num_samples_total, hddcrp.M, len(contexts), len(observation_indices)))
         }
     
     samples = {"log_acceptance_probability" : np.zeros((num_samples_total)),
@@ -579,6 +578,7 @@ def sample_model_for_maze_data(hddcrp : hddCRPModel, num_samples : int, num_warm
         samples["log_taus"][ss,:] = hddcrp.weight_params
 
         if(compute_transition_probabilties):
+            weights = weights_func(hddcrp.weight_params);
             for ii in range(len(observation_indices)):
                 transition_probabilities["probabilities"][ss,:,:,ii] = compute_transition_probs(hddcrp,  weights[ii,:], groups_numbers_each_level)
 
