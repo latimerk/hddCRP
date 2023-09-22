@@ -416,27 +416,35 @@ class sequentialhddCRPModel():
             prob_group_same_obs = self._prob_group_same_obs
         assert np.shape(prob_group_same_obs) == (self.N, self.num_layers) , "prob_group_same_obs must be shape N x num_layers"
 
-        log_P_obs_given_layer = np.zeros((self.N, self.num_layers))
-        log_P_stay_given_layer = np.zeros((self.N, self.num_layers))
-        log_P_jump_given_layer = np.zeros((self.N, self.num_layers+1))
-        log_P_jump_given_layer[:,0] = -np.inf
+        
+        log_d_given_layer = np.zeros_like(prob_group)
+        log_d_given_layer_valid = prob_group > 0
+        log_d_given_layer[log_d_given_layer_valid] = np.log(prob_group[log_d_given_layer_valid])
+        
+        log_n_given_layer = np.zeros_like(prob_group)
+        log_n_given_layer_valid = prob_group_same_obs > 0
+        log_n_given_layer[log_n_given_layer_valid] = np.log(prob_group_same_obs[log_n_given_layer_valid])
+        
+        log_d = prob_group+ alphas[np.newaxis,:]
+        log_d[ log_d_given_layer_valid] = np.log(log_d[log_d_given_layer_valid] )
 
-        log_P_obs_given_layer[:,0] = np.log(self.BaseMeasure[self._Y_compact] * alphas[0] + prob_group_same_obs[:,0]) - np.log(alphas[0] + prob_group[:,0]);
-        for layer in range(1,self.num_layers):
-            log_n = np.log(alphas[layer] + prob_group[:,layer])
-            log_P_obs_given_layer[:,layer] = np.log(prob_group_same_obs[:,layer]) - log_n;
-            log_P_stay_given_layer[:,layer] = np.log(prob_group[:,layer]) - log_n;
-            log_P_jump_given_layer[:,layer] = np.log(alphas[layer]) - log_n;
-    
-        log_P_jump_to_layer = log_P_jump_given_layer.copy()
+        log_P_obs_given_layer  = log_n_given_layer - log_d_given_layer
+        log_P_stay_given_layer = log_d_given_layer - log_d
+        log_P_jump_given_layer = np.log(alphas)[np.newaxis,:] - log_d
+
+        log_P_obs_given_layer[ ~log_n_given_layer_valid] = -np.inf
+        log_P_stay_given_layer[~log_d_given_layer_valid] = -np.inf
+        log_P_jump_given_layer[~log_d_given_layer_valid] = 0
+
+        log_P_jump_given_layer[:,0] = -np.inf
+        log_P_stay_given_layer[:,0] = 0
+        log_P_obs_given_layer[ :,0] = np.log(self.BaseMeasure[self._Y_compact] * alphas[0] + prob_group_same_obs[:,0]) - np.log(alphas[0] + prob_group[:,0]);
+
+        log_P_jump_to_layer = np.concatenate([log_P_jump_given_layer, np.zeros((self.N,1))],axis=1)
         view=np.flip(log_P_jump_to_layer,1)
         np.cumsum(view,axis=1,out=view)
 
-        log_P_level = np.zeros((self.N, self.num_layers))
-        if(self.num_layers > 1):
-            log_P_level[:,0] = log_P_jump_to_layer[:,1]
-        for layer in range(1,self.num_layers):
-            log_P_level[:,layer] = log_P_stay_given_layer[:,layer] + log_P_jump_to_layer[:,layer+1]
+        log_P_level = log_P_stay_given_layer + log_P_jump_to_layer[:,1:]
 
         return log_P_level, log_P_obs_given_layer#, log_P_jump_given_layer,log_P_stay_given_layer,log_P_jump_to_layer
     
@@ -547,7 +555,10 @@ class sequentialhddCRPModel():
         log_P_obs = np.zeros((num_contexts, self.M, self.num_layers, n_obs))
 
         for layer in range(self.num_layers-1,-1,-1):
-            log_n = np.log(alphas[layer] + prob_group[:,[layer], :]);
+            log_n = alphas[layer] + prob_group[:,[layer], :];
+            cc = log_n > 0;
+            log_n[cc] = np.log(log_n[cc]);
+            log_n[~cc] = -np.inf
             if(layer == 0):
                 bm = alphas[layer]*self.BaseMeasure[np.newaxis,:,np.newaxis]
             else:
