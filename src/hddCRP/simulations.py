@@ -141,6 +141,7 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
 
     T_total = F.shape[0];
     C_y = np.zeros((T_total),dtype=int)
+    C_depth = np.zeros((T_total),dtype=int)
     C_ctx = np.zeros((T_total, depth),dtype=int)
     C_ctx.fill(-1)
 
@@ -148,38 +149,42 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
 
     for ss in range(num_sessions):
         for tt in range(session_length[ss]):
-            for dd in range(depth,-1,-1):
+            for dd in range(depth):
                 # set contexts
                 if(tt >= dd):
                     C_ctx[tt_ctr, dd] = C_y[tt_ctr - dd]
                 else:
                     C_ctx[tt_ctr, dd] = -2
-
+            for dd in range(depth-1,-1,-1):
                 # find all previous nodes with matching context at current depth
-                nodes_with_same_context = np.where(np.all(C_ctx[:(tt_ctr+1),:(dd+1)] == C_ctx[tt_ctr,:(dd+1)], axis=1))[0]
+                nodes_with_same_context = np.where(np.all(C_ctx[:(tt_ctr),:(dd+1)] == C_ctx[tt_ctr,:(dd+1)], axis=1))[0]
                 
                 # select previous node with appropriate weight
                 wts = F[tt_ctr, nodes_with_same_context]
-                wts[nodes_with_same_context == tt_ctr] = alphas[dd];
                 Ys = C_y[nodes_with_same_context];
 
-                # if jump to shallower context
-                if(dd > 0 and rng.random() < alphas[dd]/(wts.sum())):
-                    continue;
-                else:
-                    ms = np.array([wts[Ys == mm].sum() for mm in range(M)])
-                    if(dd == 0):
-                        ms += alphas[dd]*base_measure;
-                    ms = ms/ms;
+                
+                ms = np.array([wts[Ys == mm].sum() for mm in range(M)] + [alphas[dd]])
+                ms = ms/np.sum(ms);
 
-                    C_y[tt_ctr] = rng.choice(M, p=wts);
+                rc = rng.choice(M+1, p=ms);
+
+                # if jump to shallower context
+                if(rc < M):
+                    C_y[tt_ctr] = rc;
+                    C_depth[tt_ctr] = dd;
+                    break;
+                elif(dd == 0):
+                    C_y[tt_ctr] = rng.choice(M, p=base_measure);
+                    C_depth[tt_ctr] = dd;
+                    break;
 
             # store observation 
             seqs[ss][tt] = symbols[C_y[tt_ctr]]
             tt_ctr += 1
     C = {'C_y' : C_y, 'F' : F, 'D' : D, 'C_ctx' : C_ctx,
          'session_lengths' : session_length, "symbols" : symbols, "alphas" : alphas, "base_measure" : base_measure, 
-         "param_vector" : params_vector, "param_names" : param_names, "variable_names" : variable_names, "param_types" : param_types}
+         "param_vector" : params_vector, "param_names" : param_names, "variable_names" : variable_names, "param_types" : param_types, "C_depth" : C_depth}
     return (seqs, C)
 
 def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, rng : np.random.Generator = None, use_real_parameters=False):

@@ -295,7 +295,7 @@ def setup_transition_probability_computations(model : sequentialhddCRPModel, obs
     if(observation_indices is None):
         observation_indices = model._block_ends;
     n_obs = np.size(observation_indices)
-    D_new = np.array(model._D[observation_indices,:,:].reshape((n_obs,model.N,1)))
+    D_new = np.array(model._D[observation_indices,:].reshape((n_obs,model.N,1)))
 
     if(np.size(model._weight_function_setup["inds"]) > 0):
         inds_new = model._weight_function_setup["inds"][observation_indices,:].reshape((n_obs,model.N))
