@@ -565,10 +565,13 @@ class sequentialhddCRPModel():
                 bm = 0
 
             lp = prob_group_same_obs[:,layer,:,:] + bm;
-            cc = lp > 0
-            lp[cc] = np.log(lp[cc]) - log_n(cc)
-            lp[~cc] = ~np.inf
-            log_P_obs[:,:,layer,:] = log_P_jumped  + lp
+            vv = lp > 0
+            lp[vv] = np.log(lp[vv])
+
+            lp = log_P_jumped + lp - log_n
+            lp[~vv] = -np.inf
+
+            log_P_obs[:,:,layer,:] = lp
             log_P_jumped += np.log(alphas[layer]) - log_n;
 
         log_P_obs = logsumexp(log_P_obs,axis=2)

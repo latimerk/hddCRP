@@ -305,6 +305,7 @@ def setup_transition_probability_computations(model : sequentialhddCRPModel, obs
     else:
         weight_func = lambda weight_params : complete_constant_distance_function_for_maze_task(D_new, weight_params)
     
+    model._D_predictive = D_new;
     model.setup_transition_probability_computations(groups_at_each_level, weight_func)
     return model, contexts, observation_indices
 
