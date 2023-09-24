@@ -1,8 +1,9 @@
-from __future__ import annotations
 import numpy as np
+import networkx as nx
 from collections import defaultdict
 
-
+import matplotlib.pyplot as plt
+import matplotlib as mpl
 
 # for typing and validating arguments
 from numpy.typing import ArrayLike
@@ -10,9 +11,80 @@ from typing import Callable
 
 from hddCRP.behaviorDataHandlers import create_distance_matrix, parameter_vectorizer_for_distance_matrix
 from hddCRP.behaviorDataHandlers import create_context_tree
-from hddCRP.modelFitting import complete_exponential_distance_function_for_maze_task
-from hddCRP.modelFittingSequential import sequentialhddCRPModel
+from hddCRP.modelFitting import exponential_distance_function, exponential_distance_function_for_maze_task, hddCRPModel, complete_exponential_distance_function_for_maze_task
 
+def node_name(node, layer):
+    return "l" + str(layer) + "_" + str(node);
+
+def graph_connections(session_lengths, C_ptr, ww = 2, ws=8, hs = 5, hh=0.1):
+    depth = C_ptr.shape[1]
+
+    session_lengths = np.array(session_lengths, dtype=int)
+
+    session_idxs = np.append(0, session_lengths.cumsum())
+    assert (session_idxs[-1] <= C_ptr.shape[0]), "C_ptr and session_lengths do not match"
+    nodes = session_idxs[-1];#C_ptr.shape[0]
+
+    # setup nodes
+    pos = defaultdict(lambda: (0,0))
+    G = nx.DiGraph()
+    for dd in range(depth):
+        for nn in range(nodes):
+            sess_num = np.where(session_idxs > nn)[0][0]-1
+
+            cc = node_name(nn,dd);
+            G.add_node(cc)
+
+            session_t = (nn-session_idxs[sess_num])/(session_lengths[sess_num] - 1)*2 - 1
+
+
+            pos[cc] = [nn*ww + sess_num*ws, (depth-dd-1)*hs + hh*(session_t**2)]
+    for dd in range(depth):
+        for nn in range(nodes):
+            target_dd = dd;
+            target_nn = C_ptr[nn,dd]
+            if(dd > 0 and target_nn == nn):
+                target_dd -= 1;
+            G.add_edges_from([(node_name(nn,dd), node_name(target_nn,target_dd))])
+    return (G, pos)
+
+def make_graph_plot(connection_data, ax, hs=15,hh=5,ws=8, ww=4,num_sessions=None):
+    if(num_sessions is None):
+        num_sessions = len(connection_data['session_lengths'])
+
+    depth = connection_data['C_ptr'].shape[1]
+    M = np.unique(connection_data['C_y']).size
+    T = np.sum(connection_data['session_lengths'][:num_sessions])
+    G, pos = graph_connections(connection_data['session_lengths'][:num_sessions], connection_data['C_ptr'], hs=hs,hh=hh, ww=4,ws=8)
+    node_size = 30;
+
+
+    edge_color = connection_data["C_ctx"][:T,:]
+    bb = np.arange(depth)*(M+1);
+    edge_color += bb[np.newaxis,:]
+    edge_color = edge_color.flatten(order='F')
+
+    node_color=connection_data['C_y'][:T,:].flatten(order='F')
+
+
+    nodes = nx.draw_networkx_nodes(G, pos,   node_size=node_size, node_color=node_color)
+
+
+
+    edges = nx.draw_networkx_edges(
+        G,
+        pos,
+        arrowstyle="->",
+        arrowsize=10,
+        width=2,
+        node_size=node_size,
+        edge_color=edge_color
+    )
+
+    ax.set_axis_off()
+
+    pc = mpl.collections.PatchCollection(edges)
+            
 
 
 # TODO: Simulate a set of sessions from a known Markov model
@@ -52,6 +124,8 @@ def simulate_markov_chain(initial_state_prob : ArrayLike, transition_matrix : Ar
         Y[tt] = rng.choice(states, p=p)
 
     return Y
+
+
 
 
 # TODO: Generate a hddCRP with specific alpha and distances
@@ -124,6 +198,12 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
                                                 within_block_distance_in_total_sessions  = True);
 
 
+    D_nonsequential, _ = create_distance_matrix(seqs, session_types, distinct_within_session_distance_params = distinct_within_session_distance_params,
+                                                sequential_within_session_distances = False,
+                                                sequential_between_session_same_block_distances = False,
+                                                sequential_between_session_different_block_distances = True,
+                                                within_block_distance_in_total_sessions  = True);
+    
     ## set up parameters in a specific vectorized form
     param_names, params_vector, is_within_timescale, is_between_timescale, is_between_constant_scale, timescale_inds, constant_scale_inds = parameter_vectorizer_for_distance_matrix(variable_names, session_types, within_session_time_constant = within_session_time_constant, between_session_time_constants = between_session_time_constants, between_session_constant_scales = between_session_constant_scales)
     param_types = {"is_within_timescale" : is_within_timescale, "is_between_timescale" : is_between_timescale, "is_between_constant_scale" : is_between_constant_scale,
@@ -142,9 +222,12 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
     np.fill_diagonal(F, 0);
 
     T_total = F.shape[0];
-    C_y = np.zeros((T_total),dtype=int)
-    C_depth = np.zeros((T_total),dtype=int)
+    C_ptr = np.zeros((T_total, depth),dtype=int)
+    C_y   = np.zeros((T_total, depth),dtype=int)
     C_ctx = np.zeros((T_total, depth),dtype=int)
+
+    C_ptr.fill(-1)
+    C_y.fill(-1)
     C_ctx.fill(-1)
 
     tt_ctr = 0;
@@ -154,55 +237,55 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
             for dd in range(depth):
                 # set contexts
                 if(tt >= dd):
-                    C_ctx[tt_ctr, dd] = C_y[tt_ctr - dd]
+                    C_ctx[tt_ctr, dd] = C_y[tt_ctr - dd, -1]
                 else:
                     C_ctx[tt_ctr, dd] = -2
-            for dd in range(depth-1,-1,-1):
+
                 # find all previous nodes with matching context at current depth
-                nodes_with_same_context = np.where(np.all(C_ctx[:(tt_ctr),:(dd+1)] == C_ctx[tt_ctr,:(dd+1)], axis=1))[0]
+                nodes_with_same_context = np.where(np.all(C_ctx[:(tt_ctr+1),:(dd+1)] == C_ctx[tt_ctr,:(dd+1)], axis=1))[0]
                 
                 # select previous node with appropriate weight
                 wts = F[tt_ctr, nodes_with_same_context]
-                Ys = C_y[nodes_with_same_context];
+                wts[nodes_with_same_context == tt_ctr] = alphas[dd];
+                wts = wts/np.sum(wts)
 
-                
-                ms = np.array([wts[Ys == mm].sum() for mm in range(M)] + [alphas[dd]])
-                ms = ms/np.sum(ms);
+                C_ptr[tt_ctr, dd] = rng.choice(nodes_with_same_context, p=wts);
 
-                rc = rng.choice(M+1, p=ms);
-
-                # if jump to shallower context
-                if(rc < M):
-                    C_y[tt_ctr] = rc;
-                    C_depth[tt_ctr] = dd;
-                    break;
-                elif(dd == 0):
-                    C_y[tt_ctr] = rng.choice(M, p=base_measure);
-                    C_depth[tt_ctr] = dd;
-                    break;
-
-            # store observation 
-            seqs[ss][tt] = symbols[C_y[tt_ctr]]
+                # set Y to connected node's Y
+                if(C_ptr[tt_ctr, dd] != tt_ctr):
+                    C_y[tt_ctr, dd] = C_y[C_ptr[tt_ctr, dd], dd]
+                elif(dd > 0):
+                    C_y[tt_ctr, dd] = C_y[tt_ctr, dd-1]
+                else:
+                    # if self connect: then draw Y from base measure
+                    C_y[tt_ctr, dd] = rng.choice(M, p=base_measure)
+            # store observation from final layer
+            seqs[ss][tt] = symbols[C_y[tt_ctr, -1]]
             tt_ctr += 1
-    C = {'C_y' : C_y, 'F' : F, 'D' : D, 'C_ctx' : C_ctx,
+    C = {'C_y' : C_y, 'F' : F, 'D' : D, 'C_ptr' : C_ptr, 'C_ctx' : C_ctx, "D_nonsequential" : D_nonsequential,
          'session_lengths' : session_length, "symbols" : symbols, "alphas" : alphas, "base_measure" : base_measure, 
-         "param_vector" : params_vector, "param_names" : param_names, "variable_names" : variable_names, "param_types" : param_types, "C_depth" : C_depth}
+         "param_vector" : params_vector, "param_names" : param_names, "variable_names" : variable_names, "param_types" : param_types}
     return (seqs, C)
 
-def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, rng : np.random.Generator = None, use_real_parameters=False):
+def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, rng : np.random.Generator = None, use_real_connections=True, use_nonsequential_filter_model=False):
     depth = C["alphas"].size
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
     block_ends = np.cumsum(np.array([np.size(ss) for ss in seqs],dtype=int))-1
     groupings = create_context_tree(seqs, depth=depth)
 
-    D = np.min(C["D"], axis=2)
-    inds = np.argmin(C["D"], axis=2)
+    if(use_nonsequential_filter_model):
+        D_0 = C["D_nonsequential"]
+    else:
+        D_0 = C["D"];
+    D = np.min(D_0, axis=2)
+    inds = np.argmin(D_0, axis=2)
     inds[np.isinf(D)] = -1
+    weight_func = lambda xx,yy : exponential_distance_function_for_maze_task(xx,yy)
     constant_scale_inds = C["param_types"]["constant_scale_inds"]
     timescale_inds = C["param_types"]["timescale_inds"]
     complete_weight_func = lambda d, log_timescales : complete_exponential_distance_function_for_maze_task(d, log_timescales, inds, timescale_inds, constant_scale_inds)
 
-    if(use_real_parameters):
+    if(use_real_connections):
         weight_params = np.log(C["param_vector"])
         alphas = C["alphas"]
     else:
@@ -212,19 +295,27 @@ def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, rng : np.random
 
         alphas = rng.gamma(shape=2, scale=10, size=(depth))
 
-    model = sequentialhddCRPModel(Y, groupings,
+    model = hddCRPModel(Y, groupings,
                         alphas,
                         D,
                         rng=rng,
                         Y_values=C["symbols"],
                         BaseMeasure=C["base_measure"],
                         weight_params=weight_params, 
-                        weight_func=complete_weight_func, 
+                        weight_func=None, 
+                        complete_weight_func=complete_weight_func, 
                         weight_param_labels=C["param_names"])
     model._param_types = C["param_types"]
     model._weight_function_setup = {"inds":inds,
                                     "timescale_inds":timescale_inds,
                                     "constant_scale_inds":constant_scale_inds}
     model._block_ends = block_ends
+    if(use_real_connections):
+        model._blank_connection_variables()
+        model._C_ptr[:,:] = C["C_ptr"]
+        model._initialize_predecessors();
+        model._initialize_table_labels();
+        model._initialize_table_cycles();
+        model._initialize_table_label_counts();
 
     return model
