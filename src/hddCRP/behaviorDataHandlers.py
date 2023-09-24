@@ -1,9 +1,11 @@
+from __future__ import annotations
 import numpy as np
 from numpy.typing import ArrayLike
 from typing import Callable
 from itertools import product
 
 from hddCRP.modelFittingSequential import sequentialhddCRPModel
+
 from hddCRP.modelFitting import DualAveragingForStepSize
 from hddCRP.modelFitting import log_prior_for_maze_task, complete_constant_distance_function_for_maze_task, complete_exponential_distance_function_for_maze_task
 
@@ -493,6 +495,7 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : sequentialhddCRPModel, sigma
 def sample_model_for_maze_data(hddcrp : sequentialhddCRPModel, num_samples : int, num_warmup_samples : int,
             uniform_prior : bool = False, print_every : int = None, prior_shapes = None, prior_scales=None, single_concentration_parameter=False,
             compute_transition_probabilties=True):
+
     num_samples = int(num_samples)
     num_warmup_samples = int(num_warmup_samples)
     assert num_samples > 0, "must sample positive number of values"

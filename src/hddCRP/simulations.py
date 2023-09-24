@@ -1,5 +1,7 @@
+from __future__ import annotations
 import numpy as np
 from collections import defaultdict
+
 
 
 # for typing and validating arguments
