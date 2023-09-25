@@ -156,18 +156,21 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
                 else:
                     C_ctx[tt_ctr, dd] = -2
             for dd in range(depth-1,-1,-1):
-                # find all previous nodes with matching context at current depth
-                nodes_with_same_context = np.where(np.all(C_ctx[:(tt_ctr),:(dd+1)] == C_ctx[tt_ctr,:(dd+1)], axis=1))[0]
-                
-                # select previous node with appropriate weight
-                wts = F[tt_ctr, nodes_with_same_context]
-                Ys = C_y[nodes_with_same_context];
+                if(not np.isinf(alphas[dd])):
+                    # find all previous nodes with matching context at current depth
+                    nodes_with_same_context = np.where(np.all(C_ctx[:(tt_ctr),:(dd+1)] == C_ctx[tt_ctr,:(dd+1)], axis=1))[0]
+                    
+                    # select previous node with appropriate weight
+                    wts = F[tt_ctr, nodes_with_same_context]
+                    Ys = C_y[nodes_with_same_context];
 
-                
-                ms = np.array([wts[Ys == mm].sum() for mm in range(M)] + [alphas[dd]])
-                ms = ms/np.sum(ms);
+                    
+                    ms = np.array([wts[Ys == mm].sum() for mm in range(M)] + [alphas[dd]])
+                    ms = ms/np.sum(ms);
 
-                rc = rng.choice(M+1, p=ms);
+                    rc = rng.choice(M+1, p=ms);
+                else:
+                    rc = M;
 
                 # if jump to shallower context
                 if(rc < M):
@@ -187,8 +190,9 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
          "param_vector" : params_vector, "param_names" : param_names, "variable_names" : variable_names, "param_types" : param_types, "C_depth" : C_depth}
     return (seqs, C)
 
-def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, rng : np.random.Generator = None, use_real_parameters=False):
-    depth = C["alphas"].size
+def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, rng : np.random.Generator = None, use_real_parameters=False, depth=None):
+    if(depth is None):
+        depth = C["alphas"].size
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
     block_ends = np.cumsum(np.array([np.size(ss) for ss in seqs],dtype=int))-1
     groupings = create_context_tree(seqs, depth=depth)
@@ -202,7 +206,7 @@ def create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, C, rng : np.random
 
     if(use_real_parameters):
         weight_params = np.log(C["param_vector"])
-        alphas = C["alphas"]
+        alphas = C["alphas"][0:depth]
     else:
         weight_params = np.zeros_like(C["param_vector"])
         weight_params[0] = np.log(rng.gamma(shape=2, scale=20, size=(1)))
