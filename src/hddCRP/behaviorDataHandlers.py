@@ -401,7 +401,7 @@ def compute_kl_diveregences_between_transition_probabilities(probs_1, probs_2, c
 
     
 
-def Metropolis_Hastings_step_for_maze_data(hddcrp : sequentialhddCRPModel, sigma2 : ArrayLike | float, uniform_prior : bool = False, 
+def Metropolis_Hastings_step_for_maze_data(hddcrp : sequentialhddCRPModel | list[sequentialhddCRPModel], sigma2 : ArrayLike | float, uniform_prior : bool = False, 
         prior_shapes = None, prior_scales=None, single_concentration_parameter=False) -> tuple[sequentialhddCRPModel, float]:
     '''
     Takes a random-walk Metropolis-Hastings step for the hddCRP model parameters.
@@ -421,21 +421,28 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : sequentialhddCRPModel, sigma
     Raises:
         ValueError: if sigma2 is incorrect shape
     '''
+    if isinstance(hddcrp, list):
+        multi_model = True;
+        hddcrp_0 = hddcrp[0]
+    else:
+        hddcrp_0 = hddcrp
+        multi_model = False;
+
     if(single_concentration_parameter):
         num_alphas = 1;
-        theta_current = np.concatenate([[np.log(hddcrp.alpha[0])], hddcrp.weight_params.flatten()]);
+        theta_current = np.concatenate([[np.log(hddcrp_0.alpha[0])], hddcrp_0.weight_params.flatten()]);
     else:
-        num_alphas = hddcrp.alpha.size;
-        theta_current = np.concatenate([np.log(hddcrp.alpha), hddcrp.weight_params.flatten()]);
-    weight_idx = range(num_alphas, hddcrp.weight_params.size + num_alphas)
+        num_alphas = hddcrp_0.alpha.size;
+        theta_current = np.concatenate([np.log(hddcrp_0.alpha), hddcrp_0.weight_params.flatten()]);
+    weight_idx = range(num_alphas, hddcrp_0.weight_params.size + num_alphas)
     alpha_idx = range(num_alphas)
 
     if(np.isscalar(sigma2)):
-        eps = hddcrp._rng.normal(scale=np.sqrt(sigma2),size=theta_current.shape)
+        eps = hddcrp_0._rng.normal(scale=np.sqrt(sigma2),size=theta_current.shape)
     elif(np.size(sigma2) == np.size(theta_current)):
-        eps = hddcrp._rng.normal(scale=np.sqrt(np.array(sigma2).flatten()))
+        eps = hddcrp_0._rng.normal(scale=np.sqrt(np.array(sigma2).flatten()))
     elif(np.shape(sigma2) == (np.size(theta_current),)*2):
-        eps = hddcrp._rng.multivariate_normal(np.zeros_like(theta_current), sigma2)
+        eps = hddcrp_0._rng.multivariate_normal(np.zeros_like(theta_current), sigma2)
     else:
         raise ValueError("invalid variance for random-walk Metropolis-Hastings step: " + str(sigma2))
 
@@ -446,11 +453,16 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : sequentialhddCRPModel, sigma
     weight_curr = theta_current[weight_idx]
     weight_star = theta_star[weight_idx]
 
-    log_p_Y_current = hddcrp.compute_log_likelihood()
-    log_p_Y_star    = hddcrp.compute_log_likelihood(alphas=np.exp(log_alpha_star), weight_params=theta_star[weight_idx])
-    w_idx = hddcrp._param_types["is_within_timescale"]
-    b_idx = hddcrp._param_types["is_between_timescale"]
-    s_idx = hddcrp._param_types["is_between_constant_scale"]
+    if(multi_model):
+        log_p_Y_current = np.array([hddcrp_c.compute_log_likelihood() for hddcrp_c in hddcrp])
+        log_p_Y_star    = np.array([hddcrp_c.compute_log_likelihood(alphas=np.exp(log_alpha_star), weight_params=theta_star[weight_idx]) for hddcrp_c in hddcrp])
+    else:
+        log_p_Y_current = hddcrp.compute_log_likelihood()
+        log_p_Y_star    = hddcrp.compute_log_likelihood(alphas=np.exp(log_alpha_star), weight_params=theta_star[weight_idx])
+
+    w_idx = hddcrp_0._param_types["is_within_timescale"]
+    b_idx = hddcrp_0._param_types["is_between_timescale"]
+    s_idx = hddcrp_0._param_types["is_between_constant_scale"]
     
 
     if(uniform_prior):
@@ -469,17 +481,22 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : sequentialhddCRPModel, sigma
                                         alpha_shape=prior_shapes["alpha"], timescale_within_shape=prior_shapes["tau_within"], timescale_between_shape=prior_shapes["tau_between"], 
                                         alpha_scale=prior_scales["alpha"], timescale_within_scale=prior_scales["tau_within"], timescale_between_scale=prior_scales["tau_between"])   
 
-    log_acceptance_probability = min(0.0, log_p_Y_star + log_P_theta_star - (log_p_Y_current + log_P_theta_current))
+    log_acceptance_probability = min(0.0, np.sum(log_p_Y_star) + log_P_theta_star - (np.sum(log_p_Y_current) + log_P_theta_current))
 
-    like_diff = log_p_Y_star - log_p_Y_current
+    like_diff = np.sum(log_p_Y_star) - np.sum(log_p_Y_current)
     prior_diff = log_P_theta_star - log_P_theta_current
 
     aa = -np.random.exponential()
 
     if(aa < log_acceptance_probability):
         accepted = True
-        hddcrp.alpha = np.exp(log_alpha_star)
-        hddcrp.weight_params = weight_star
+        if(multi_model):
+            for hddcrp_c in hddcrp:
+                hddcrp_c.alpha = np.exp(log_alpha_star)
+                hddcrp_c.weight_params = weight_star
+        else:
+            hddcrp.alpha = np.exp(log_alpha_star)
+            hddcrp.weight_params = weight_star
         log_like = log_p_Y_star
         log_prior = log_P_theta_star
     else:
@@ -541,3 +558,57 @@ def sample_model_for_maze_data(hddcrp : sequentialhddCRPModel, num_samples : int
     if(compute_transition_probabilties):
         samples["transition_probabilities"] = transition_probabilities;
     return (hddcrp, samples, step_size_settings)
+
+
+
+def sample_population_model_for_maze_data(hddcrps : list[sequentialhddCRPModel], num_samples : int, num_warmup_samples : int,
+            uniform_prior : bool = False, print_every : int = None, prior_shapes = None, prior_scales=None, single_concentration_parameter=False,
+            prior_concentration_for_mixing : float = 1, num_components : int = 1):
+    num_samples = int(num_samples)
+    num_warmup_samples = int(num_warmup_samples)
+    assert num_samples > 0, "must sample positive number of values"
+    assert num_warmup_samples >= 0, "must sample positive number of values"
+
+    if(num_components != 1):
+        raise NotImplementedError("Not fully implemented for multi-component model")
+
+    num_samples_total = num_samples + num_warmup_samples
+
+    step_size_settings = DualAveragingForStepSize();
+
+    num_models = len(hddcrps)
+
+    for hddcrp in hddcrps:
+        hddcrp.weight_params = hddcrps[0].weight_params;
+        if(single_concentration_parameter):
+            hddcrp.alpha = hddcrps[0].alpha[0];
+
+    
+    samples = {"log_acceptance_probability" : np.zeros((num_samples_total)),
+               "log_like_diff" : np.zeros((num_samples_total)),
+               "log_prior_diff" : np.zeros((num_samples_total)),
+               "log_like" : np.zeros((num_samples_total, num_models)),
+               "log_prior" : np.zeros((num_samples_total, num_components)),
+               "log_prior_mixing" : np.zeros((num_samples_total)),
+               "log_p_state" : np.zeros((num_samples_total, num_models)),
+               "accepted" : np.zeros((num_samples_total),dtype=bool),
+               "state" : np.zeros((num_samples_total, num_models),dtype=int),
+               "alphas"   : np.zeros((num_samples_total,hddcrps[0].alpha.size)), #,num_components
+               "log_taus" : np.zeros((num_samples_total,hddcrps[0].weight_params.size)), #,num_components
+               "num_warmup_samples" : num_warmup_samples}
+
+    
+    for ss in range(num_samples_total):
+        if((not print_every is None) and (ss % print_every == 0)):
+            print("Sample " + str(ss) + " / " + str(num_samples_total))
+        sigma2 = step_size_settings.step_size_fixed if ss >= num_warmup_samples else step_size_settings.step_size_for_warmup
+        hddcrps, samples["log_acceptance_probability"][ss], samples["accepted"][ss], samples["log_like"][ss,:], samples["log_prior"][ss,:] , samples["log_like_diff"][ss], samples["log_prior_diff"][ss] = Metropolis_Hastings_step_for_maze_data(hddcrps, sigma2, uniform_prior=uniform_prior, prior_shapes = prior_shapes, prior_scales=prior_scales, single_concentration_parameter=single_concentration_parameter)
+
+        samples["alphas"][ss,:] = hddcrps[0].alpha
+        samples["log_taus"][ss,:] = hddcrps[0].weight_params
+
+
+        if(ss < num_warmup_samples):
+            step_size_settings.update(np.exp(samples["log_acceptance_probability"][ss]))
+
+    return (hddcrps, samples, step_size_settings)
