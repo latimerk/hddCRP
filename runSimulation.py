@@ -49,6 +49,7 @@ if(simulation_id == 0):
     within_session_time_constant = [20] # units = actions
     session_length = lambda run_idx, block_idx : 50 * (block_idx) # trials per session
     num_sessions   = lambda run_idx, block_idx : 1 # trials per session
+    num_models     = lambda run_idx, block_idx : 1 # trials per session
 
     action_labels = [0,1,2] 
     maze_symbols = ['A']
@@ -68,6 +69,7 @@ elif(simulation_id == 1):
     within_session_time_constant = [40] # units = actions
     session_length = lambda run_idx, block_idx : 50 * (block_idx) # trials per session
     num_sessions   = lambda run_idx, block_idx : 1 # trials per session
+    num_models     = lambda run_idx, block_idx : 1 # trials per session
 
     action_labels = [0,1,2] 
     maze_symbols = ['A']
@@ -87,6 +89,7 @@ elif(simulation_id == 2):
     within_session_time_constant = [50] # units = actions
     session_length = lambda run_idx, block_idx : 50 * (block_idx) # trials per session
     num_sessions   = lambda run_idx, block_idx : 1 # trials per session
+    num_models     = lambda run_idx, block_idx : 1 # trials per session
 
     action_labels = [0,1,2] 
     maze_symbols = ['A']
@@ -100,6 +103,8 @@ elif(simulation_id == 2):
     single_concentration_parameter = False;
 
     fit_depth = depth;
+
+
 elif(simulation_id == 3):
     depth  = 3; # look 2 actions in the past
     alphas = [10,5,5] # concentration parameters: per depth in the hddCRP tree. alphas[0] first level (no action context), alphas[1] is the second (for regularizing p(y_t | y_{t-1})), etc...
@@ -107,6 +112,7 @@ elif(simulation_id == 3):
     within_session_time_constant = [50] # units = actions
     session_length = lambda run_idx, block_idx : 50 * (block_idx) # trials per session
     num_sessions   = lambda run_idx, block_idx : 1 # trials per session
+    num_models     = lambda run_idx, block_idx : 1 # trials per session
 
     action_labels = [0,1,2] 
     maze_symbols = ['A']
@@ -120,10 +126,50 @@ elif(simulation_id == 3):
     single_concentration_parameter = False;
 
     fit_depth = 2;
+elif(simulation_id == 4):
+    depth  = 3; # look 2 actions in the past
+    alphas = [5,10,10] # concentration parameters: per depth in the hddCRP tree. alphas[0] first level (no action context), alphas[1] is the second (for regularizing p(y_t | y_{t-1})), etc...
+    between_session_time_constants = np.array([[ 1]]) # units = sessions
+    within_session_time_constant = [20] # units = actions
+    session_length = lambda run_idx, block_idx : 50  # trials per session
+    num_sessions   = lambda run_idx, block_idx : 1 # trials per session
+    num_models     = lambda run_idx, block_idx : (block_idx) # trials per session
+
+    action_labels = [0,1,2] 
+    maze_symbols = ['A']
+    uniform_prior = False
+    min_blocks_per_type = 1
+    max_blocks_per_type = 10;
+    prior_scales = {"alpha" : 5, "tau_within" : 25, "tau_between" : 5}
+    prior_shapes = {"alpha" : 2, "tau_within" :  2, "tau_between" : 2}
+
+    use_nonsequential_filter_model = False
+    single_concentration_parameter = False;
+    fit_depth = depth;
+elif(simulation_id == 5):
+    depth  = 3; # look 2 actions in the past
+    alphas = [10,5,5] # concentration parameters: per depth in the hddCRP tree. alphas[0] first level (no action context), alphas[1] is the second (for regularizing p(y_t | y_{t-1})), etc...
+    between_session_time_constants = np.array([[ 1]]) # units = sessions
+    within_session_time_constant = [40] # units = actions
+    session_length = lambda run_idx, block_idx : 50 # trials per session
+    num_sessions   = lambda run_idx, block_idx : 1 # trials per session
+    num_models     = lambda run_idx, block_idx : (block_idx) # trials per session
+
+    action_labels = [0,1,2] 
+    maze_symbols = ['A']
+    uniform_prior = False
+    min_blocks_per_type = 1
+    max_blocks_per_type = 10;
+    prior_scales = {"alpha" : 5, "tau_within" : 25, "tau_between" : 5}
+    prior_shapes = {"alpha" : 2, "tau_within" :  2, "tau_between" : 2}
+
+    use_nonsequential_filter_model = False
+    single_concentration_parameter = False;
+    fit_depth = depth;
 else:
     raise NotImplementedError
 
-max_blocks_per_type = 5;
+max_blocks_per_type = 10;
 blocks_range = range(min_blocks_per_type,max_blocks_per_type+1);
 
 
@@ -160,32 +206,48 @@ for run_idx in run_range:
             session_labels = [];
             for aa in maze_symbols:
                 session_labels += [aa] * num_sessions(run_idx, block_idx)  # which maze
+            n_sims = num_models(run_idx, block_idx);
             print("session_lengths: " + str(session_lengths))
             print("session_labels : " + str(session_labels))
+            print("n_sims:          " + str(n_sims))
 
-            seqs, connection_data = hddCRP.simulations.simulate_sequential_hddCRP(session_lengths, session_labels, action_labels, depth, rng_sim, alphas, 
-                    between_session_time_constants = between_session_time_constants, within_session_time_constant = within_session_time_constant)
+
+            if(n_sims == 1):
+                seqs, connection_data = hddCRP.simulations.simulate_sequential_hddCRP(session_lengths, session_labels, action_labels, depth, rng_sim, alphas, 
+                        between_session_time_constants = between_session_time_constants, within_session_time_constant = within_session_time_constant)
+                model = hddCRP.simulations.create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, connection_data, rng=rng_fit, 
+                        use_real_parameters=initialize_fit_with_real_connections, depth=fit_depth)
+            else:
+                models = []
+                connection_data = []
+                for sim_num in range(n_sims):
+                    seqs, connection_data_c = hddCRP.simulations.simulate_sequential_hddCRP(session_lengths, session_labels, action_labels, depth, rng_sim, alphas, 
+                            between_session_time_constants = between_session_time_constants, within_session_time_constant = within_session_time_constant)
+                    model = hddCRP.simulations.create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, connection_data_c, rng=rng_fit, 
+                            use_real_parameters=initialize_fit_with_real_connections, depth=fit_depth)
+                    models += [model]
+                    connection_data += [connection_data_c]
 
             simulation_info = {"rng_seed_simulation" : rng_seed_sim, "rng_seed_fitting" : rng_seed_fit, "rng_type" : "MT19937",
                             "session_lengths" : session_lengths, "session_labels" : session_labels, "action_labels" : action_labels,
                             "seqs" : seqs, "connection_data" : connection_data}
 
-            model = hddCRP.simulations.create_hddCRPModel_from_simulated_sequential_hddCRP(seqs, connection_data, rng=rng_fit, 
-                    use_real_parameters=initialize_fit_with_real_connections, depth=fit_depth)
 
-            
-
-            
             tau_names = [str(xx) for xx in model.weight_param_labels]
             alphas_names = ["alpha_concentration_no_context", "alpha_concentration_one_back_context", "alpha_concentration_two_back_context"]
-            model, samples, step_size_settings = hddCRP.behaviorDataHandlers.sample_model_for_maze_data(model, num_samples=num_samples, 
-                            num_warmup_samples=num_warmup_samples, print_every=2500, uniform_prior=uniform_prior, prior_shapes=prior_shapes, prior_scales=prior_scales, 
-                            single_concentration_parameter=single_concentration_parameter)
+            if(n_sims == 1):
+                model, samples, step_size_settings = hddCRP.behaviorDataHandlers.sample_model_for_maze_data(model, num_samples=num_samples, 
+                                num_warmup_samples=num_warmup_samples, print_every=2500, uniform_prior=uniform_prior, prior_shapes=prior_shapes, prior_scales=prior_scales, 
+                                single_concentration_parameter=single_concentration_parameter)
+            else:
+                models, samples, step_size_settings = hddCRP.behaviorDataHandlers.sample_population_model_for_maze_data(models, num_samples=num_samples, 
+                                num_warmup_samples=num_warmup_samples, print_every=2500, uniform_prior=uniform_prior, prior_shapes=prior_shapes, prior_scales=prior_scales, 
+                                single_concentration_parameter=single_concentration_parameter)
 
             if(depth > fit_depth):
-                ag =  np.ones((depth-fit_depth, samples["alphas"].shape[1]));
+                ag =  np.ones((samples["alphas"].shape[0], depth-fit_depth));
                 ag.fill(np.inf)
-                samples["alphas"] = np.concatenate([samples["alphas"], ag], axis=0)
+                samples["alphas"] = np.concatenate([samples["alphas"], ag], axis=1)
 
             MCMC_info = {"initialized_with_true_connections" : initialize_fit_with_real_connections,
                         "step_size_settings" : step_size_settings.to_dict(),

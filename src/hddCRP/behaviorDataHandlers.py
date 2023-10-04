@@ -526,7 +526,8 @@ def sample_model_for_maze_data(hddcrp : sequentialhddCRPModel, num_samples : int
         hddcrp, contexts, observation_indices = setup_transition_probability_computations(hddcrp)
         transition_probabilities = { "contexts" : contexts,
             "observation_indices" : observation_indices,
-            "probabilities" : np.zeros((num_samples_total, hddcrp.M, len(contexts), len(observation_indices)))
+            "probabilities" : np.zeros((num_samples_total, hddcrp.M, len(contexts), len(observation_indices))),
+            "sampled_probabilities" : np.zeros((num_samples_total, hddcrp.M, len(contexts), len(observation_indices)))
         }
     
     samples = {"log_acceptance_probability" : np.zeros((num_samples_total)),
@@ -551,6 +552,7 @@ def sample_model_for_maze_data(hddcrp : sequentialhddCRPModel, num_samples : int
 
         if(compute_transition_probabilties):
             transition_probabilities["probabilities"][ss,:,:,:] = hddcrp.compute_preditive_transition_probabilities()
+            transition_probabilities["sampled_probabilities"][ss,:,:,:] = hddcrp.sample_preditive_transition_probabilities()
 
         if(ss < num_warmup_samples):
             step_size_settings.update(np.exp(samples["log_acceptance_probability"][ss]))
@@ -563,7 +565,7 @@ def sample_model_for_maze_data(hddcrp : sequentialhddCRPModel, num_samples : int
 
 def sample_population_model_for_maze_data(hddcrps : list[sequentialhddCRPModel], num_samples : int, num_warmup_samples : int,
             uniform_prior : bool = False, print_every : int = None, prior_shapes = None, prior_scales=None, single_concentration_parameter=False,
-            prior_concentration_for_mixing : float = 1, num_components : int = 1):
+            prior_concentration_for_mixing : float = 1, num_components : int = 1, compute_transition_probabilties : bool = True):
     num_samples = int(num_samples)
     num_warmup_samples = int(num_warmup_samples)
     assert num_samples > 0, "must sample positive number of values"
@@ -582,6 +584,19 @@ def sample_population_model_for_maze_data(hddcrps : list[sequentialhddCRPModel],
         hddcrp.weight_params = hddcrps[0].weight_params;
         if(single_concentration_parameter):
             hddcrp.alpha = hddcrps[0].alpha[0];
+        else:
+            hddcrp.alpha = hddcrps[0].alpha;
+
+    if(compute_transition_probabilties):
+        transition_probabilities = []
+        for hddcrp in hddcrps:
+            hddcrp, contexts, observation_indices = setup_transition_probability_computations(hddcrp)
+            transition_probabilities_c = { "contexts" : contexts,
+                "observation_indices" : observation_indices,
+                "probabilities" : np.zeros((num_samples_total, hddcrp.M, len(contexts), len(observation_indices))),
+                "sampled_probabilities" : np.zeros((num_samples_total, hddcrp.M, len(contexts), len(observation_indices)))
+            } 
+            transition_probabilities += [transition_probabilities_c]
 
     
     samples = {"log_acceptance_probability" : np.zeros((num_samples_total)),
@@ -607,8 +622,15 @@ def sample_population_model_for_maze_data(hddcrps : list[sequentialhddCRPModel],
         samples["alphas"][ss,:] = hddcrps[0].alpha
         samples["log_taus"][ss,:] = hddcrps[0].weight_params
 
+        if(compute_transition_probabilties):
+            for mm, hddcrp in enumerate(hddcrps):
+                transition_probabilities[mm]["probabilities"][ss,:,:,:] = hddcrp.compute_preditive_transition_probabilities()
+                transition_probabilities[mm]["sampled_probabilities"][ss,:,:,:] = hddcrp.sample_preditive_transition_probabilities()
 
         if(ss < num_warmup_samples):
             step_size_settings.update(np.exp(samples["log_acceptance_probability"][ss]))
+
+    if(compute_transition_probabilties):
+        samples["transition_probabilities"] = transition_probabilities;
 
     return (hddcrps, samples, step_size_settings)
