@@ -30,109 +30,92 @@ def create_context_tree_single_session(seq : ArrayLike, depth : int = 3, delim :
 def create_context_tree(seqs : list[ArrayLike], depth : int = 3, delim : str = "-") -> list[np.ndarray]:
     return np.concatenate([create_context_tree_single_session(ss, depth=depth, delim=delim) for ss in seqs], axis=0)
 
+
+
+
 # TODO: Function to get distances from a set of time series actions (set of sessions)
 def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   distinct_within_session_distance_params : bool = True,
-                                                                            sequential_within_session_distances : bool = True,
-                                                                            sequential_between_session_same_block_distances : bool = True,
-                                                                            sequential_between_session_different_block_distances : bool = True,
-                                                                            within_block_distance_in_total_sessions : bool = True):
+                                                                            nback_scales : int = 2):
     block_ids = np.array(block_ids).flatten()
     assert len(seqs) == len(block_ids), "number of sequences and block_ids must be the same (number of trials)"
 
     # num_sessions = len(seqs)
-    session_lengths = [np.size(xx) for xx in seqs];
+
+    session_lengths       = [np.size(xx) for xx in seqs];
     session_start_indexes = np.append(0,np.cumsum(session_lengths));
-    total_observations = np.sum(session_lengths);
+    total_observations    = np.sum(session_lengths);
 
     block_types = np.unique(block_ids);
-    session_block_indexes = [np.where(block_ids == bb)[0] for bb in block_types];
     B = len(block_types)
 
     ##
-    num_possible_parameters = (B ** 2) + (B if distinct_within_session_distance_params else 1);
-    D = np.zeros((total_observations, total_observations, num_possible_parameters))
-    D.fill(np.inf)
+    D = np.zeros((total_observations, total_observations, 2 + nback_scales))
+    D[:,:,2] = -1
     variable_ctr = 0;
     variable_names = [];
-    
-    ## Within session effects: should be sequential or all?
-    for bb in range(B):
-        for ss in session_block_indexes[bb]:
-            t_end = session_start_indexes[ss+1]
-            t_start = session_start_indexes[ss]
-            t = t_end - t_start;
-            r = np.arange(t,dtype=float)
-            L = r[:,np.newaxis] - r; #np. np.ones((t, t));
-            if(sequential_within_session_distances):
-                # L = np.tril(L);
-                L[L < 0] = np.inf
 
-            D[t_start:t_end,t_start:t_end,variable_ctr] = L
-        if(distinct_within_session_distance_params):
-            variable_ctr += 1;
-            variable_names += [{"scale" : "trial", "label" : block_types[bb]}]
-    if(not distinct_within_session_distance_params):
-        variable_ctr += 1;
-        variable_names += [{"scale" : "trial", "label" : ALL_BLOCK_TYPES}]
+    variable_names += [{"type" : "trial_timeconstant", "label" : ALL_BLOCK_TYPES}]
+    variable_names += [{"type" : "trial_timeconstant", "label" : block_types[bb]}]
+    variable_names += [{"type" : "session_timeconstant", "from" : block_types[bb_end], "to" : block_types[bb_start]}]
 
-    ## Within block effects: distance is number of sessions between 
-    for bb in range(B):
-        for start_num, ss_start in enumerate(session_block_indexes[bb]):
-            for end_num, ss_end in enumerate(session_block_indexes[bb]):
-                distance_in_same_block = start_num - end_num; # units: sessions
-                distance_all_sessions =  ss_start - ss_end; # units: sessions
-                if(ss_start > ss_end or not sequential_between_session_same_block_distances):
-                    t1_end = session_start_indexes[ss_start+1]
-                    t1_start = session_start_indexes[ss_start]
-                    t2_end = session_start_indexes[ss_end+1]
-                    t2_start = session_start_indexes[ss_end]
+    within_session_parameter_num  = np.zeros((len(B)), dtype=int)-1
+    between_session_parameter_num = np.zeros((len(B), len(B)), dtype=int)-1
 
-                    D[t1_start:t1_end, t2_start:t2_end, variable_ctr] = distance_all_sessions if within_block_distance_in_total_sessions else distance_in_same_block;
-        variable_ctr += 1;
-        variable_names += [{"scale" : "session", "from" : block_types[bb], "to" : block_types[bb]}]
+    for session_num_to, seq_to in enumerate(seqs):
+        to_idx = np.arange(0,session_lengths[seq_to]) + session_start_indexes[seq_to]
+        to_block_idx = np.where(B == block_ids[session_num_to])[0]
+
+        for session_num_from, seq_from in enumerate(seqs[:(session_num_to)]):
+            from_block_idx = np.where(B == block_ids[session_num_from])[0]
+
+            if(between_session_parameter_num[to_block_idx, from_block_idx] < 0):
+                variable_names += [{"type" : "session_timeconstant", "from" : block_types[from_block_idx], "to" : block_types[to_block_idx]}]
+                between_session_parameter_num[to_block_idx, from_block_idx] = variable_ctr
+                variable_ctr += 1
+
+            from_idx = range(0,session_lengths[seq_from]) + session_start_indexes[seq_from]
+            D[to_idx, from_idx, 0] = session_num_to-session_num_from
+            D[to_idx, from_idx, 1] = between_session_parameter_num[to_block_idx, from_block_idx]
+
+        # within session
+        if(within_session_parameter_num[to_block_idx] < 0):
+            if(distinct_within_session_distance_params):
+                variable_names += [{"type" : "trial_timeconstant", "label" : block_types[to_block_idx]}]
+                within_session_parameter_num[to_block_idx] = variable_ctr
+                variable_ctr += 1
+            else:
+                variable_names += [{"type" : "trial_timeconstant", "label" : ALL_BLOCK_TYPES}]
+                within_session_parameter_num[:] = variable_ctr
+                variable_ctr += 1
+
+        ds = np.maximum(to_idx[:,np.newaxis] - to_idx[np.newaxis,:], 0);
+        D[to_idx, to_idx, 0] = ds
+        cs = np.ones(len(to_idx),len(to_idx)) * within_session_parameter_num[to_block_idx]
+        cs[ds <= 0] = -1;
+
+    num_timeconstants = variable_ctr
+
+    for session_num_to, seq_to in enumerate(seqs):
+        to_idx = np.arange(0,session_lengths[seq_to]) + session_start_indexes[seq_to]
 
 
-    for bb_start in range(B):
-        for bb_end in range(B):
-            if(bb_start == bb_end):
-                continue;
-
-            for ss_start in session_block_indexes[bb_start]:
-                for ss_end in session_block_indexes[bb_end]:
-                    if(ss_start > ss_end or not sequential_between_session_different_block_distances):
-                        t1_end = session_start_indexes[ss_start+1]
-                        t1_start = session_start_indexes[ss_start]
-                        t2_end   = session_start_indexes[ss_end+1]
-                        t2_start = session_start_indexes[ss_end]
-                        D[t1_start:t1_end, t2_start:t2_end, variable_ctr] = ss_start - ss_end;
-            variable_ctr += 1;
-            variable_names += [{"scale" : "session", "from" : block_types[bb_end], "to" : block_types[bb_start]}]
-    
-    # remove unused params
-    vv = [np.any(~np.isinf(D[:,:,xx])) for xx in range(D.shape[2])];
-    D = D[:,:,vv];
-    variable_names = np.array(variable_names)[vv].tolist();
     
     
-    return (D, variable_names)
+    return (D, variable_names, num_timeconstants)
 
-def parameter_vectorizer_for_distance_matrix(variable_names, session_types, within_session_time_constant = 50, between_session_time_constants = 10, between_session_constant_scales = None):
+def parameter_vectorizer_for_distance_matrix(variable_names, session_types, within_session_time_constant = 50, between_session_time_constants = 10, nback_scales = 1):
     ## set up parameters in a specific vectorized form
-    within_session_vars  = [xx for xx in variable_names if xx["scale"] == "trial"];
-    between_session_vars = [xx for xx in variable_names if xx["scale"] == "session"];
-    using_scales = not between_session_constant_scales is None
+    within_session_vars  = [xx for xx in variable_names if xx["type"] == "trial_timeconstant"];
+    between_session_vars = [xx for xx in variable_names if xx["type"] == "session_timeconstant"];
+    nback_scales_vars = [xx for xx in variable_names if xx["type"] == "nback_scales"];
     # param_names = ["" for xx in range(len(within_session_vars) + len(between_session_vars)*2)];
-    param_names = ["" for xx in range(len(within_session_vars) + (1 + using_scales)*len(between_session_vars))];
-    n_timescales = len(within_session_vars) + len(between_session_vars);
+    param_names = ["" for xx in range(len(within_session_vars) + len(between_session_vars) + len(nback_scales_vars))];
 
     params_vector = np.zeros((len(param_names)))
     is_within_timescale = np.zeros((len(param_names)), dtype=bool)
     is_between_timescale = np.zeros((len(param_names)), dtype=bool)
-    is_between_constant_scale = np.zeros((len(param_names)), dtype=bool)
-    timescale_inds = np.zeros((n_timescales), dtype=bool) - 1
-    constant_scale_inds = np.zeros((n_timescales), dtype=bool) - 1
+    is_nback_scale = np.zeros((len(param_names)), dtype=bool)
 
-    timescale_ctr = 0;
 
     unique_session_types = np.unique(session_types);
 
@@ -149,11 +132,8 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
             params_vector[ctr] = within_session_time_constant
         else:
             params_vector[ctr] = within_session_time_constant[pos]
-        timescale_inds[timescale_ctr] = ctr
-        constant_scale_inds[timescale_ctr] = -1
         is_within_timescale[ctr] = True
 
-        timescale_ctr += 1;
         ctr += 1
     
     for from_label in unique_session_types:
@@ -168,23 +148,8 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
                 params_vector[ctr] = between_session_time_constants
             else:
                 params_vector[ctr] = between_session_time_constants[pos_from,pos_to]
-            timescale_inds[timescale_ctr] = ctr
             is_between_timescale[ctr] = True
             ctr += 1
-
-            if(using_scales):
-                param_names[ctr] = str(between_session_vars[0]["from"]) + "_to_" + str(between_session_vars[0]["to"]) + "_session_constant_scale";
-                if(np.isscalar(between_session_constant_scales)):
-                    params_vector[ctr]    = between_session_constant_scales
-                else:
-                    params_vector[ctr]    = between_session_constant_scales[pos_from,pos_to]
-
-
-                constant_scale_inds[timescale_ctr] = ctr
-                is_between_constant_scale[ctr] = True
-                
-            timescale_ctr += 1;
-            ctr += 1;
 
     for from_label in unique_session_types:
         pos_from = np.where(unique_session_types == from_label)[0][0];
@@ -202,24 +167,36 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
                     params_vector[ctr] = between_session_time_constants
                 else:
                     params_vector[ctr] = between_session_time_constants[pos_from,pos_to]
-
-                    timescale_inds[timescale_ctr] = ctr
                 is_between_timescale[ctr] = True
                 ctr += 1;
-    
-                if(using_scales):
-                    param_names[ctr] = str(between_session_vars[0]["from"]) + "_to_" + str(between_session_vars[0]["to"]) + "_session_constant_scale";
-                    if(np.isscalar(between_session_constant_scales)):
-                        params_vector[ctr]    = between_session_constant_scales
-                    else:
-                        params_vector[ctr]    = between_session_constant_scales[pos_from,pos_to]
-                    constant_scale_inds[timescale_ctr] = ctr
-                    is_between_constant_scale[ctr] = True
 
-                timescale_ctr += 1;
-                ctr += 1;
-    num_within_session_timeconstants = len(within_session_vars)
-    return (param_names, params_vector, is_within_timescale, is_between_timescale, is_between_constant_scale, timescale_inds, constant_scale_inds)
+        for var in within_session_vars:
+            if(var["label"] == ALL_BLOCK_TYPES):
+                pos = 0;
+                param_names[ctr] = "within_session_time_constant"
+            else:
+                pos = np.where(unique_session_types == var["label"])[0][0];
+                param_names[ctr] = "within_session_" + str(var["label"]) + "_time_constant"
+
+            if(np.isscalar(within_session_time_constant)):
+                params_vector[ctr] = within_session_time_constant
+            else:
+                params_vector[ctr] = within_session_time_constant[pos]
+            is_within_timescale[ctr] = True
+            ctr += 1
+
+    for var in nback_scales_vars:
+        param_names[ctr] = "nback_scale_" + str(var["nback"])
+
+        if(np.isscalar(nback_scales)):
+            params_vector[ctr] = nback_scales
+        else:
+            params_vector[ctr] = nback_scales[var["nback"]-1]
+        is_nback_scale[ctr] = True
+
+        ctr += 1
+    
+    return (param_names, params_vector, is_within_timescale, is_between_timescale, is_nback_scale)
 
 # TODO: Function to take a set of sessions and return a hddCRPModel
 def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = None,
