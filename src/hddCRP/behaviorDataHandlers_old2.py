@@ -4,9 +4,13 @@ from typing import Callable
 from itertools import product
 
 from hddCRP.modelFittingSequential import sequentialhddCRPModel
+from hddCRP.modelFitting import DualAveragingForStepSize
+from hddCRP.modelFitting import log_prior_for_maze_task, complete_constant_distance_function_for_maze_task, complete_exponential_distance_function_for_maze_task
+
 
 EMPTY_INDICATOR = "NULL"
 ALL_BLOCK_TYPES = "ALL_SESSIONS"
+
 
 
 # TODO: Function to get tree of groups for time series of actions

@@ -42,7 +42,7 @@ class sequentialhddCRPModel():
                     elements of Y.
           BaseMeasure: (length M or empty) The base measure of observations. If None (or scalar), then assumes uniform distribution over Y_values.
           weight_params: (length P) The parameters for the distance-to-weight function
-          weight_func: (length N-1 array - distances (range(1,N)), length P array - params) -> non-negative scalar
+          weight_func: (distances J x N x K, params length P, num_layers) -> distances J x N x num_layers, J x M array 
                        Function for taking a single distance between two observations into the weight for connection from one node to the next in the hddCRP.
           weight_param_labels: (length P) List of names for each of the weight_params values
           rng : random number generator to use - is np.random.default_rng() by default
@@ -145,10 +145,10 @@ class sequentialhddCRPModel():
         # sets up base measure
         self.BaseMeasure = BaseMeasure;
 
-        self._weights = np.zeros((self.N,self.N)); # the actual weights to be computed from the distances given the parameters and function
-
+        self._weights = np.zeros((self.N,self.N,self.num_layers)); # the actual weights to be computed from the distances given the parameters and function
+        self._weights_base_measure = np.zeros((self.N, self.M))
         # sets up the weighting function
-        self._complete_weight_func = weight_func;
+        self._weight_func = weight_func;
 
         # sets up and validates D as a numpy array: makes K property valid
         if(D is None):
@@ -171,9 +171,6 @@ class sequentialhddCRPModel():
         else:
             assert len(weight_param_labels) == self.P, "incorrect number of weight_param_labels"
             self._weight_param_labels = weight_param_labels;
-
-                
-                    
 
     
     '''
@@ -251,8 +248,9 @@ class sequentialhddCRPModel():
         theta = np.array(theta,dtype=float);
         assert theta.shape == self._weight_params.shape, "parameters must be length (P)"
         self._weight_params = np.array(theta,dtype=float); 
-        self._weights[:,:] = self._compute_weights(self._weight_params)
+        self._weights[:,:,:], self._weights_base_measure[:,:] = self._compute_weights(self._weight_params)
         assert np.all(self._weights >= 0), "invalid connection weights found! check the weight/distance function"
+        assert np.all(self._weights_base_measure >= 0), "invalid base measure weights found! check the weight/distance function"
 
         self._prob_group = self._compute_sum_prob_group()
         self._prob_group_same_obs = self._compute_sum_prob_group_same_observation()
@@ -335,28 +333,24 @@ class sequentialhddCRPModel():
             previous_in_group_distances_mat = previous_in_group_distances;
         
         if(predictive):
-            assert (F.shape[0] == previous_in_group_distances_mat.shape[3]) and (F.shape[1] == previous_in_group_distances_mat.shape[1]), "distance/group matrix and weight sizes do not match"
-            
             n_obs     = previous_in_group_distances_mat.shape[3]
             n_contexts = previous_in_group_distances_mat.shape[0]
             n_prev = previous_in_group_distances_mat.shape[1]
-            PCs = np.zeros((n_contexts, self.num_layers, n_obs));
-            for nn in range(n_obs):
-                for layer in range(self.num_layers):
-                    PCs[:, layer, nn] = previous_in_group_distances_mat[:,:,layer,nn] @ F[nn,:]
+            # F = (n_contexts, N, layers, n_obs)
+            assert F.shape == (n_contexts, n_prev, self.num_layers, n_obs), "distance/group matrix and weight sizes do not match"
+            
+            PCs = np.sum(previous_in_group_distances_mat * F,axis=1,keepdims=True).squeeze(axis=1)
         else:
-            assert (F.shape[1] == previous_in_group_distances_mat.shape[1]) and (F.shape[0] == previous_in_group_distances_mat.shape[0]), "distance/group matrix and weight sizes do not match"
+            assert F.shape == (previous_in_group_distances_mat.shape[0], previous_in_group_distances_mat.shape[1], self.num_layers), "distance/group matrix and weight sizes do not match"
         
             n_obs = previous_in_group_distances_mat.shape[0]
-            PCs = np.zeros((n_obs, self.num_layers));
         
             # for layer, llg in enumerate(previous_in_group_distances):
             #     for obs, gg in enumerate(llg):
             #         PCs[obs, layer] = np.sum(F[gg])
             # for layer in range(self.num_layers):
             #     PCs[:, layer] = previous_in_group_distances_mat[:,:,layer] @ F
-            for layer in range(self.num_layers):
-                PCs[:, layer] = (F * previous_in_group_distances_mat[:,:,layer]).sum(axis=1)
+            PCs= (F * previous_in_group_distances_mat).sum(axis=1,keepdims=True).squeeze(axis=1)
         return PCs
     
     def _compute_sum_prob_group_same_observation(self, F : ArrayLike = None, previous_in_group_distances_same_observation = None, predictive : bool = False ) -> ArrayLike:
@@ -378,29 +372,26 @@ class sequentialhddCRPModel():
             previous_in_group_distances_same_observation_mat = previous_in_group_distances_same_observation;
         
         if(predictive):
-            assert (F.shape[0] == previous_in_group_distances_same_observation_mat.shape[4]) and (F.shape[1] == previous_in_group_distances_same_observation_mat.shape[1]), "distance/group matrix and weight sizes do not match"
-            
             n_obs     = previous_in_group_distances_same_observation_mat.shape[4]
             n_contexts = previous_in_group_distances_same_observation_mat.shape[0]
             n_prev   = previous_in_group_distances_same_observation_mat.shape[1]
+            # F = (n_contexts, N, layers, n_obs)
+            assert F.shape == (n_contexts, n_prev, self.num_layers, n_obs), "distance/group matrix and weight sizes do not match"
+
 
             PCs = np.zeros((n_contexts, self.num_layers, self.M, n_obs));
-            for nn in range(n_obs):
-                for layer in range(self.num_layers):
-                    for mm in range(self.M):
-                        PCs[:, layer, mm, nn] = previous_in_group_distances_same_observation_mat[:,:,layer, mm,nn] @ F[nn,:]
+            for mm in range(self.M):
+                PCs[:, :, mm, :] = (np.sum(previous_in_group_distances_same_observation_mat[:,:,:, mm,:]
+                                      .squeeze(axis=3) * F ,axis=1,keepdims=True)
+                                      .squeeze(axis=1))
+        
         else:
-            assert (F.shape[1] == previous_in_group_distances_same_observation_mat.shape[1]) and (F.shape[0] == previous_in_group_distances_same_observation_mat.shape[0]), "distance/group matrix and weight sizes do not match"
             n_obs = previous_in_group_distances_same_observation_mat.shape[0]
+            n_prev   = previous_in_group_distances_same_observation_mat.shape[1]
+
+            assert F.shape == (n_obs, n_prev, self.num_layers), "distance/group matrix and weight sizes do not match"
             
-            PCs = np.zeros((n_obs, self.num_layers));
-            for layer in range(self.num_layers):
-                PCs[:, layer] = (previous_in_group_distances_same_observation_mat[:,:,layer] * F).sum(axis=1)
-            #for layer, lly in enumerate(self._previous_in_group_distances_same_observation):
-                # for obs, yy in enumerate(lly):
-                #     PCs[obs, layer] = np.sum(F[yy])
-                # for layer in range(self.num_layers):
-                #     PCs[:, layer] = previous_in_group_distances_same_observation_mat[:,:,layer] @ F
+            PCs  = (previous_in_group_distances_same_observation_mat * F).sum(axis=1,keepdims=True).squeeze(axis=1)
         return PCs
     def _compute_log_p_layer_and_log_p_obs_given_level(self, alphas : ArrayLike = None, prob_group : ArrayLike = None, prob_group_same_obs : ArrayLike = None):
         if(alphas is None):
@@ -437,9 +428,14 @@ class sequentialhddCRPModel():
         log_P_stay_given_layer[~log_d_given_layer_valid] = -np.inf
         log_P_jump_given_layer[~log_d_given_layer_valid] = 0
 
+
         log_P_jump_given_layer[:,0] = -np.inf
         log_P_stay_given_layer[:,0] = 0
-        log_P_obs_given_layer[ :,0] = np.log(self.BaseMeasure[self._Y_compact] * alphas[0] + prob_group_same_obs[:,0]) - np.log(alphas[0] + prob_group[:,0]);
+
+
+        scaled_base_measure = self.BaseMeasure[self._Y_compact] * alphas[0] * self._weights_base_measure[np.s_[range(self.N),self._Y_compact]]
+        log_P_obs_given_layer[ :,0] = (np.log(scaled_base_measure + prob_group_same_obs[:,0]) 
+                                       - np.log(alphas[0]*np.sum(self._weights_base_measure, axis=1) + prob_group[:,0]));
 
         log_P_jump_to_layer = np.concatenate([log_P_jump_given_layer, np.zeros((self.N,1))],axis=1)
         view=np.flip(log_P_jump_to_layer,1)
@@ -475,11 +471,12 @@ class sequentialhddCRPModel():
 
         return log_like
         
-    def setup_transition_probability_computations(self, groups_at_each_level, weight_function : Callable):
-        distances = weight_function(self.weight_params)
+    def setup_transition_probability_computations(self, groups_at_each_level, distances : ArrayLike):
 
         assert len(groups_at_each_level) == self.num_layers, "number of layers in group assignment doesn't match"
         n_contexts = len(groups_at_each_level[0])
+        n_obs      = distances.shape[3];
+        assert distances.shape == ( n_contexts, self.N, self.K, n_obs), "incorrect distance size"
         assert np.all([len(xx) == n_contexts for xx in groups_at_each_level]), "number of contexts in group assignment doesn't match"
 
         groups_numbers_each_level = [[]] * self.num_layers # layer x contexts
@@ -489,8 +486,8 @@ class sequentialhddCRPModel():
         # sets up group index information
         # test_previous_in_group_distances = []; # layer x observation x num in group
         # test_previous_in_group_distances_per_obs = [];  # layer x observation x Y type x num in group 
-        test_previous_in_group_distances_matrix = np.zeros((n_contexts, self.N, self.num_layers, distances.shape[0]) , dtype=bool)
-        test_previous_in_group_distances_per_obs_matrix = np.zeros((n_contexts, self.N,self.num_layers, self.M, distances.shape[0]),dtype=bool )
+        test_previous_in_group_distances_matrix = np.zeros((n_contexts, self.N, self.num_layers, n_obs) , dtype=bool)
+        test_previous_in_group_distances_per_obs_matrix = np.zeros((n_contexts, self.N,self.num_layers, self.M, n_obs),dtype=bool )
         for layer in range(self.num_layers):
             # prev_in_group_c = [];
             # prev_in_group_obs_c = [];
@@ -518,11 +515,7 @@ class sequentialhddCRPModel():
         self._predictive_transition_probability_setup = {"test_previous_in_group_distances_matrix" : test_previous_in_group_distances_matrix,
                                                          "test_previous_in_group_distances_per_obs_matrix" : test_previous_in_group_distances_per_obs_matrix,
                                                          "groups_numbers_each_level" : groups_numbers_each_level,
-                                                         "weight_function" : weight_function}
-        # "contexts" : contexts,
-        #                                                  "test_previous_in_group_distances" : test_previous_in_group_distances,
-        #                                                  "test_previous_in_group_distances_per_obs" : test_previous_in_group_distances_per_obs,
-                                                         
+                                                         "distances" : distances}
 
     def compute_preditive_transition_probabilities(self, alphas : ArrayLike = None, weight_params : ArrayLike = None):
         if(alphas is None):
@@ -539,15 +532,15 @@ class sequentialhddCRPModel():
                 weight_params = np.ones_like(self._weight_params)*weight_params
             weight_params = np.array(weight_params)
         assert np.size(weight_params) == self._weight_params.size, "invalid parameters"
-        F = self._predictive_transition_probability_setup["weight_function"](weight_params)
+        F, base_weights = self._weight_func(self._predictive_transition_probability_setup["distances"], weight_params, self.num_layers)
 
-        
         #    prob_group = np.zeros((n_contexts, self.num_layers, n_obs));
         prob_group = self._compute_sum_prob_group(F, predictive=True)
         #    prob_group_same_obs = np.zeros((n_contexts, self.num_layers, self.M, n_obs));
         prob_group_same_obs = self._compute_sum_prob_group_same_observation(F, predictive=True)
         
-        n_obs = F.shape[0]
+        n_obs = F.shape[3]
+
         num_contexts = self._predictive_transition_probability_setup["test_previous_in_group_distances_per_obs_matrix"].shape[0]
         log_P_jumped = np.zeros((num_contexts, 1, n_obs))
 
@@ -559,7 +552,7 @@ class sequentialhddCRPModel():
             log_n[cc] = np.log(log_n[cc]);
             log_n[~cc] = -np.inf
             if(layer == 0):
-                bm = alphas[layer]*self.BaseMeasure[np.newaxis,:,np.newaxis]
+                bm = alphas[layer]*self.BaseMeasure[np.newaxis,:,np.newaxis]*base_weights
             else:
                 bm = 0
 
@@ -581,24 +574,6 @@ class sequentialhddCRPModel():
 
         return P_obs
     
-    def compute_preditive_transition_probabilities_markov(self, layer : int, alpha : float = 0):
-        layer = int(layer)
-        assert np.isscalar(alpha) and alpha >= 0, "alpha be non-negative scalar"
-        assert layer >= 0 and layer < self.num_layers, "invalid layer"
-
-        F = self._predictive_transition_probability_setup["weight_function"](weight_params)
-        F = np.ones_like(F)
-        #    prob_group_same_obs = np.zeros((n_contexts, self.num_layers, self.M, n_obs));
-        prob_group_same_obs = self._compute_sum_prob_group_same_observation(F, predictive=True)
-        
-
-        P_obs = (prob_group_same_obs[:,layer,:,:]+  alpha*self.BaseMeasure[np.newaxis,:,np.newaxis])
-        
-        P_obs = P_obs / np.sum(P_obs,axis=1,keepdims=True)
-
-        P_obs = np.swapaxes(P_obs,0,1) # for compatability with other model's code
-        return P_obs
-
     def sample_preditive_transition_probabilities(self, alphas : ArrayLike = None, weight_params : ArrayLike = None, rng : np.random.Generator = None):
         if(rng is None):
             rng = np.random.default_rng()
@@ -616,41 +591,36 @@ class sequentialhddCRPModel():
                 weight_params = np.ones_like(self._weight_params)*weight_params
             weight_params = np.array(weight_params)
         assert np.size(weight_params) == self._weight_params.size, "invalid parameters"
-        F = self._predictive_transition_probability_setup["weight_function"](weight_params)
+        F, base_weights = self._weight_func(self._predictive_transition_probability_setup["distances"], weight_params, self.num_layers)
 
         #    prob_group = np.zeros((n_contexts, self.num_layers, n_obs));
-        prob_group = self._compute_sum_prob_group(F, predictive=True)
+        # prob_group = self._compute_sum_prob_group(F, predictive=True)
         #    prob_group_same_obs = np.zeros((n_contexts, self.num_layers, self.M, n_obs));
         prob_group_same_obs = self._compute_sum_prob_group_same_observation(F, predictive=True)
         
         n_obs = F.shape[0]
         num_contexts = self._predictive_transition_probability_setup["test_previous_in_group_distances_per_obs_matrix"].shape[0]
 
-        P_obs = np.zeros((num_contexts, self.M, n_obs))
+        P_obs = base_weights
 
-        sampled = np.zeros((num_contexts,1,n_obs),dtype=bool)
+        for ii in range(num_contexts):
+            for jj in range(n_obs):
+                P_obs = rng.dirichlet(alphas[0] * base_weights[ii,:,jj])
 
+        for layer in range(0, self.num_layers):
+            pg = prob_group_same_obs[:,layer,:,:] + alphas[layer] * P_obs
 
-        for layer in range(self.num_layers-1,-1,-1):
-            norm_c = prob_group[:,[layer], :];
-            if(layer == 0):
-                bm = alphas[layer]*self.BaseMeasure[np.newaxis,:,np.newaxis]
-                new_sampled = (~sampled)
-            else:
-                bm = 0;
-                pa = alphas[layer] / (alphas[layer] + norm_c)
-            
-                new_sampled = (~sampled) & (rng.random(size=pa.size) > pa)
-
-            aa = prob_group_same_obs[:,layer,:,:] + bm;
-            for ii in range(num_contexts):
-                for jj in range(n_obs):
-                    if(new_sampled[ii,0,jj]):
-                        aa_c = aa[ii,:,jj]
-                        vv = aa_c > 0;
-                        P_obs[ii,vv,jj] = rng.dirichlet(aa_c[vv])
-            sampled = sampled | new_sampled
-
+            for jj in range(n_obs):
+                found_group = np.zeros((num_contexts),dtype=bool)
+                cnums = self._predictive_transition_probability_setup["groups_numbers_each_level"][layer]
+                for ii in range(num_contexts):
+                    if(~found_group[ii]):
+                        P_obs[ii,:,jj] = rng.dirichlet(pg[ii,:,jj] )
+                        found_group[ii] = True;
+                        for kk in range(ii+1, num_contexts):
+                            if(cnums[ii] == cnums[kk]):
+                                P_obs[kk,:,jj] = P_obs[ii,:,jj]
+                                found_group[kk] = True;
 
         P_obs = np.swapaxes(P_obs,0,1) # for compatability with other model's code
         return P_obs
@@ -664,6 +634,13 @@ class sequentialhddCRPModel():
         Returns:
           The weights for each connection given the weight parameters
         '''
-        F = self._complete_weight_func(self._D, weights) # mnp.apply_along_axis(lambda rr : self._weight_func(rr, weights), 2, self._D)
+        F, base_measure_weights = self._weight_func(self._D, weights, self.num_layers) 
+        if(F.ndim == 2):
+            F = F[...,np.newaxis]
+        if(F.shape[2] == 1 and self.num_layers > 1):
+            F = np.repeat(F,self.num_layers,axis=2)
+        assert F.shape == (self._D.shape[0], self._D.shape[1], self.num_layers), "output of weight function is invalid shape"
+        assert base_measure_weights.shape == (self._D.shape[0], self.M), "output of weight function for base measure multiplier is invalid shape"
+        
         np.fill_diagonal(F, 0);
-        return F;
+        return F, base_measure_weights;
