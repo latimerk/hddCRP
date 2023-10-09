@@ -1,13 +1,38 @@
 import numpy as np
 from numpy.typing import ArrayLike
-from typing import Callable
 from itertools import product
 
-from hddCRP.modelFittingSequential import sequentialhddCRPModel
+from scipy.stats import gamma
+
+from hddCRP.modelFittingSequential import sequentialhddCRPModel, DualAveragingForStepSize
 
 EMPTY_INDICATOR = "NULL"
 ALL_BLOCK_TYPES = "ALL_SESSIONS"
 
+
+def distance_function_for_maze_task(log_params, D, B, num_layers,  num_timescales):
+    timescales = np.exp(log_params[:num_timescales])
+    log_scales = log_params[num_timescales:][np.newaxis,np.newaxis,:]
+    
+    F = np.zeros(D.shape[:2] + (num_layers,) + D.shape[3:],dtype=float);
+    basemeasure_scale = np.zeros((D.shape[0], num_layers))
+
+    distances = np.abs(D[:,:,[0],...])
+    timescale_inds = D[:,:,[1],...]
+    for tt_ind, tt in enumerate(timescales):
+        distances[timescale_inds == tt_ind] = -distances[timescale_inds == tt_ind]/tt
+
+    if(D.shape[2] > 2 and len(log_scales) > 0):
+        F[:,:,(num_layers-1):0:-1,...] = np.cumsum(D[:,:,2:,...] * log_scales,axis=2)
+    F += distances
+    F = np.exp(F)
+    
+    if(len(log_scales) > 0):
+        basemeasure_scale = np.exp(np.sum(B * log_scales,axis=2))
+    else:
+        basemeasure_scale = None
+
+    return F, basemeasure_scale
 
 # TODO: Function to get tree of groups for time series of actions
 def create_context_tree_single_session(seq : ArrayLike, depth : int = 3, delim : str = "-") -> np.ndarray:
@@ -34,8 +59,9 @@ def create_context_tree(seqs : list[ArrayLike], depth : int = 3, delim : str = "
 
 
 # TODO: Function to get distances from a set of time series actions (set of sessions)
-def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   distinct_within_session_distance_params : bool = True,
-                                                                            nback_scales : int = 2):
+def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike, actions = None,
+                                distinct_within_session_distance_params : bool = True,
+                                nback_scales : int = 2):
     block_ids = np.array(block_ids).flatten()
     assert len(seqs) == len(block_ids), "number of sequences and block_ids must be the same (number of trials)"
 
@@ -50,9 +76,16 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
 
     ##
     D = np.zeros((total_observations, total_observations, 2 + nback_scales))
-    D[:,:,2] = -1
+    D[:,:,1] = -1
     variable_ctr = 0;
     variable_names = [];
+
+    if(actions is None):
+        actions       = np.unique([np.unique(xx) for xx in seqs]);
+    actions = np.array(actions)
+    actions.sort()
+
+    B = np.zeros((total_observations, len(actions), nback_scales))
 
     variable_names += [{"type" : "trial_timeconstant", "label" : ALL_BLOCK_TYPES}]
     variable_names += [{"type" : "trial_timeconstant", "label" : block_types[bb]}]
@@ -92,16 +125,29 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike,   dist
         D[to_idx, to_idx, 0] = ds
         cs = np.ones(len(to_idx),len(to_idx)) * within_session_parameter_num[to_block_idx]
         cs[ds <= 0] = -1;
+        D[to_idx, to_idx, 1] = ds
 
     num_timeconstants = variable_ctr
 
-    for session_num_to, seq_to in enumerate(seqs):
-        to_idx = np.arange(0,session_lengths[seq_to]) + session_start_indexes[seq_to]
+    for nback in range(1,nback_scales+1):
 
+        variable_names += [{"type" : "nback_scales", "label" : "weight_same_" + str(nback) + "_back"}]
+        variable_ctr += 1
 
-    
-    
-    return (D, variable_names, num_timeconstants)
+        for session_num_to, seq_to in enumerate(seqs):
+            to_idx = np.arange(0,session_lengths[seq_to]) + session_start_indexes[seq_to]
+            
+            prev_seq = np.roll(seq_to,nback)[:,np.newaxis]
+            prev_seq[:nback] = np.iinfo(np.int64).min 
+            seq_to = np.array(seq_to)[:,np.newaxis];
+            vv = prev_seq.T == seq_to;
+            vv = np.tril(vv,-1)
+            D[to_idx, to_idx, 1 + nback] = ds
+
+            for ii, action in enumerate(actions):
+                B[to_idx,ii,nback-1] = prev_seq == action
+    B = np.sum(B,axis=2)
+    return (D,  B, variable_names, num_timeconstants)
 
 def parameter_vectorizer_for_distance_matrix(variable_names, session_types, within_session_time_constant = 50, between_session_time_constants = 10, nback_scales = 1):
     ## set up parameters in a specific vectorized form
@@ -115,7 +161,6 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
     is_within_timescale = np.zeros((len(param_names)), dtype=bool)
     is_between_timescale = np.zeros((len(param_names)), dtype=bool)
     is_nback_scale = np.zeros((len(param_names)), dtype=bool)
-
 
     unique_session_types = np.unique(session_types);
 
@@ -199,88 +244,80 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
     return (param_names, params_vector, is_within_timescale, is_between_timescale, is_nback_scale)
 
 # TODO: Function to take a set of sessions and return a hddCRPModel
-def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = None,
-        weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None, sequential_distances_only : bool = True, include_timescales=True ):
-    if(not sequential_distances_only):
-        raise NotImplementedError("Sequential distances only in this model")
+def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = None, actions = None,
+        weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None):
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
-    block_ends = np.cumsum(np.array([np.size(ss) for ss in seqs],dtype=int))-1
+    if(actions == None):
+        actions = np.unique(Y)
+    actions = np.array(actions)
+    actions.sort()
+
+    block_ends   = np.cumsum(np.array([np.size(ss) for ss in seqs],dtype=int))-1
+    block_starts = np.cumsum(np.array([0] + [np.size(ss) for ss in seqs],dtype=int))
     groupings = create_context_tree(seqs, depth=depth)
-    D_0, distance_labels = create_distance_matrix(seqs, block_ids,
+
+    D, B, distance_labels = create_distance_matrix(seqs, block_ids,
                                                 distinct_within_session_distance_params = True,
-                                                sequential_within_session_distances = sequential_distances_only,
-                                                sequential_between_session_same_block_distances = sequential_distances_only,
-                                                sequential_between_session_different_block_distances = sequential_distances_only,
-                                                within_block_distance_in_total_sessions  = True);
+                                                nback_scales = depth-1, actions=actions);
+
+    # set up distances for predictive distributions
+    prefixes = [str(xx) + '-' for xx in actions]
+    combinations = list(product(prefixes,repeat=depth-1))
+
+    prediction_groups_at_each_level = [[]] * depth
+    prediction_groups_at_each_level[0] = ['' for xx in combinations]
+    for ii in range(1,depth):
+        prediction_groups_at_each_level[ii] = [''.join(xx[-ii:]) for xx in combinations]
+    contexts = [''.join(xx) for xx in combinations]
+    observation_indices = block_ends;
+
+    num_contexts = len(contexts)
+
+    D_pred = np.zeros((num_contexts, D.shape[1], D.shape[2], len(seqs)))
+    B_pred = np.zeros((num_contexts, B.shape[1], B.shape[2], len(seqs)))
+
+    # get weights for specified observations
+    for ii in range(seqs):
+        seq_idx = range(block_starts[ii],block_starts[ii+1])
+        for jj, con in enumerate(contexts):
+            seqs_c = [ss.copy() for ss in seqs[:(ii+1)]]
+            seqs_c[-1] = seqs_c[-1] + list(con) + [np.nan]
+
+            D_c, B_c, *_ = create_distance_matrix(seqs_c, block_ids[:(ii+1)],
+                                            distinct_within_session_distance_params = True,
+                                            nback_scales = depth-1, actions=actions);
+            D_c = D_c[-1,:block_starts[ii+1], :]
+            D_c[seq_idx,:] -= len(con)
+            D_pred[jj, :, :] = D_c
+
+            B_pred[jj, :, :, ii] = B_c[-1,:,:]
+    
 
     if(alpha_0 is None):
         alpha_0 = rng.gamma(shape=2, scale=10, size=(depth))
-    if(include_timescales):
-        param_names, params_vector, is_within_timescale, is_between_timescale, is_between_constant_scale, timescale_inds, constant_scale_inds = parameter_vectorizer_for_distance_matrix(distance_labels, np.unique(block_ids))
-        param_types = {"is_within_timescale" : is_within_timescale, "is_between_timescale" : is_between_timescale, "is_between_constant_scale" : is_between_constant_scale}
 
-        if(not weight_params_0 is None):
-            params_vector[:] = weight_params_0
-        else:
-            params_vector[0]  = rng.gamma(shape=2, scale=20, size=(1))
-            params_vector[1:] = rng.gamma(shape=2, scale=10, size=(len(params_vector)-1))
+    param_names, params_vector, is_within_timescale, is_between_timescale, is_nback_scale = parameter_vectorizer_for_distance_matrix(distance_labels, np.unique(block_ids))
+    param_types = {"is_within_timescale" : is_within_timescale, "is_between_timescale" : is_between_timescale, "is_nback_scale" : is_nback_scale}
+    
 
-        D = np.min(D_0, axis=2)
-        inds = np.argmin(D_0, axis=2)
-        inds[np.isinf(D)] = -1
-
-
-        complete_weight_func = lambda d, log_timescales : complete_exponential_distance_function_for_maze_task(d, log_timescales, inds, timescale_inds,constant_scale_inds)
-
+    if(not weight_params_0 is None):
+        params_vector[:] = weight_params_0
     else:
-        complete_weight_func = lambda d, log_timescales : complete_constant_distance_function_for_maze_task(d, log_timescales)
+        params_vector[is_within_timescale]  = rng.gamma(shape=2,  scale=20, size=(np.sum(is_within_timescale)))
+        params_vector[is_between_timescale] = rng.gamma(shape=2,  scale=5, size=(np.sum(is_between_timescale)))
+        params_vector[is_nback_scale]       = rng.gamma(shape=20, scale=1/20, size=(np.sum(is_nback_scale)))
 
-        inds = np.array([],dtype=int);
-        timescale_inds = np.array([],dtype=int);
-        constant_scale_inds = np.array([],dtype=int);
-        D = np.min(D_0, axis=2)
-
-        param_types = {"is_within_timescale" : np.array([],dtype=bool), "is_between_timescale" : np.array([],dtype=bool), "is_between_constant_scale" : np.array([],dtype=bool)}
-        param_names = []
-        params_vector = np.array([])
+    weight_func =  lambda D, B, log_params, num_layers : distance_function_for_maze_task(log_params, D, B, num_layers,  num_timescales)
 
     model = sequentialhddCRPModel(Y, groupings, alpha_0, D,
-                       weight_params=np.log(params_vector),  weight_param_labels=param_names, weight_func=complete_weight_func, rng=rng)
+                       weight_params=np.log(params_vector),  weight_param_labels=param_names, weight_func=weight_func, rng=rng)
     model._param_types = param_types
-    model._weight_function_setup = {"inds":inds,
-                                    "timescale_inds":timescale_inds,
-                                    "constant_scale_inds":constant_scale_inds}
-    model._block_ends = block_ends
+    model._block_ends  = block_ends
+
+
+    model.setup_transition_probability_computations(prediction_groups_at_each_level, observation_indices, contexts, D_pred, B_pred)
     return model
 
-def setup_transition_probability_computations(model : sequentialhddCRPModel, observation_indices=None):
-    prefixes = [str(xx) + '-' for xx in np.unique(model._Y)]
-    combinations = list(product(prefixes,repeat=model.num_layers-1))
-
-    groups_at_each_level = [[]] * model.num_layers
-    groups_at_each_level[0] = ['' for xx in combinations]
-    for ii in range(1,model.num_layers):
-        groups_at_each_level[ii] = [''.join(xx[-ii:]) for xx in combinations]
-
-    contexts = [''.join(xx) for xx in combinations]
-
-    # get weights for specified observations
-    if(observation_indices is None):
-        observation_indices = model._block_ends;
-    n_obs = np.size(observation_indices)
-    D_new = np.array(model._D[observation_indices,:].reshape((n_obs,model.N,1)))
-
-    if(np.size(model._weight_function_setup["inds"]) > 0):
-        inds_new = model._weight_function_setup["inds"][observation_indices,:].reshape((n_obs,model.N))
-        D_new[inds_new == 0] += 1
-
-        weight_func = lambda weight_params : complete_exponential_distance_function_for_maze_task(D_new, weight_params, inds_new, model._weight_function_setup["timescale_inds"],model._weight_function_setup["constant_scale_inds"])
-    else:
-        weight_func = lambda weight_params : complete_constant_distance_function_for_maze_task(D_new, weight_params)
-    
-    model._D_predictive = D_new;
-    model.setup_transition_probability_computations(groups_at_each_level, weight_func)
-    return model, contexts, observation_indices
 
 
 def compute_kl_diveregences_between_transition_probabilities(probs_1, probs_2, contexts_1, contexts_2,rng=None):
@@ -435,24 +472,35 @@ def Metropolis_Hastings_step_for_maze_data(hddcrp : sequentialhddCRPModel | list
 
     w_idx = hddcrp_0._param_types["is_within_timescale"]
     b_idx = hddcrp_0._param_types["is_between_timescale"]
-    s_idx = hddcrp_0._param_types["is_between_constant_scale"]
+    s_idx = hddcrp_0._param_types["is_nback_scale"]
     
 
     if(uniform_prior):
         raise NotImplementedError("Should not be running in this mode for production")
-        log_P_theta_current, *_ = uniform_prior_for_maze_task(log_alpha_curr, weight_curr[w_idx], weight_curr[b_idx], weight_curr[s_idx]) 
-        log_P_theta_star, *_    = uniform_prior_for_maze_task(log_alpha_star, weight_star[w_idx], weight_star[b_idx], weight_star[s_idx])  
     else:
-        if(prior_shapes is None or prior_scales is None):
-            log_P_theta_current, *_ = log_prior_for_maze_task(log_alpha_curr, weight_curr[w_idx], weight_curr[b_idx], weight_curr[s_idx]) 
-            log_P_theta_star, *_    = log_prior_for_maze_task(log_alpha_star, weight_star[w_idx], weight_star[b_idx], weight_star[s_idx]) 
-        else: 
-            log_P_theta_current, *_ = log_prior_for_maze_task(log_alpha_curr, weight_curr[w_idx], weight_curr[b_idx], weight_curr[s_idx], 
-                                        alpha_shape=prior_shapes["alpha"], timescale_within_shape=prior_shapes["tau_within"], timescale_between_shape=prior_shapes["tau_between"], 
-                                        alpha_scale=prior_scales["alpha"], timescale_within_scale=prior_scales["tau_within"], timescale_between_scale=prior_scales["tau_between"]) 
-            log_P_theta_star, *_    = log_prior_for_maze_task(log_alpha_star, weight_star[w_idx], weight_star[b_idx], weight_star[s_idx], 
-                                        alpha_shape=prior_shapes["alpha"], timescale_within_shape=prior_shapes["tau_within"], timescale_between_shape=prior_shapes["tau_between"], 
-                                        alpha_scale=prior_scales["alpha"], timescale_within_scale=prior_scales["tau_within"], timescale_between_scale=prior_scales["tau_between"])   
+        if(prior_shapes is None):
+            prior_shapes = {"alpha" : 2,
+                            "tau_within" : 2,
+                            "tau_between" : 2,
+                            "nback" : 20}
+        if( prior_scales is None):
+            prior_scales = {"alpha" : 5,
+                            "tau_within" : 25,
+                            "tau_between" : 5,
+                            "nback" : 1/20}
+        
+        
+        log_P_theta_current = 0;
+        log_P_theta_current += np.sum(gamma.logpdf(np.exp(log_alpha_curr),     prior_shapes["alpha"], scale=prior_scales["alpha"])             + log_alpha_curr)
+        log_P_theta_current += np.sum(gamma.logpdf(np.exp(weight_curr[w_idx]), prior_shapes["tau_within"], scale=prior_scales["tau_within"])   + weight_curr[w_idx])
+        log_P_theta_current += np.sum(gamma.logpdf(np.exp(weight_curr[b_idx]), prior_shapes["tau_between"], scale=prior_scales["tau_between"]) + weight_curr[b_idx])
+        log_P_theta_current += np.sum(gamma.logpdf(np.exp(weight_curr[s_idx]), prior_shapes["nback"], scale=prior_scales["nback"])             + weight_curr[s_idx])
+
+        log_P_theta_star = 0;
+        log_P_theta_star += np.sum(gamma.logpdf(np.exp(log_alpha_star),     prior_shapes["alpha"], scale=prior_scales["alpha"])             + log_alpha_star)
+        log_P_theta_star += np.sum(gamma.logpdf(np.exp(weight_star[w_idx]), prior_shapes["tau_within"], scale=prior_scales["tau_within"])   + weight_star[w_idx])
+        log_P_theta_star += np.sum(gamma.logpdf(np.exp(weight_star[b_idx]), prior_shapes["tau_between"], scale=prior_scales["tau_between"]) + weight_star[b_idx])
+        log_P_theta_star += np.sum(gamma.logpdf(np.exp(weight_star[s_idx]), prior_shapes["nback"], scale=prior_scales["nback"])             + weight_star[s_idx])
 
     log_acceptance_probability = min(0.0, np.sum(log_p_Y_star) + log_P_theta_star - (np.sum(log_p_Y_current) + log_P_theta_current))
 
@@ -496,7 +544,9 @@ def sample_model_for_maze_data(hddcrp : sequentialhddCRPModel, num_samples : int
         hddcrp.alpha = hddcrp.alpha[0];
 
     if(compute_transition_probabilties):
-        hddcrp, contexts, observation_indices = setup_transition_probability_computations(hddcrp)
+        contexts = hddcrp._predictive_transition_probability_setup["contexts"]
+        observation_indices = hddcrp._predictive_transition_probability_setup["observation_indices"]
+
         transition_probabilities = { "contexts" : contexts,
             "observation_indices" : observation_indices,
             "probabilities" : np.zeros((num_samples_total, hddcrp.M, len(contexts), len(observation_indices))),
@@ -563,7 +613,9 @@ def sample_population_model_for_maze_data(hddcrps : list[sequentialhddCRPModel],
     if(compute_transition_probabilties):
         transition_probabilities = []
         for hddcrp in hddcrps:
-            hddcrp, contexts, observation_indices = setup_transition_probability_computations(hddcrp)
+            contexts = hddcrp._predictive_transition_probability_setup["contexts"]
+            observation_indices = hddcrp._predictive_transition_probability_setup["observation_indices"]
+
             transition_probabilities_c = { "contexts" : contexts,
                 "observation_indices" : observation_indices,
                 "probabilities" : np.zeros((num_samples_total, hddcrp.M, len(contexts), len(observation_indices))),
