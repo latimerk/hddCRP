@@ -2,6 +2,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from itertools import product
 
+
 from scipy.stats import gamma
 
 from hddCRP.modelFittingSequential import sequentialhddCRPModel, DualAveragingForStepSize
@@ -15,7 +16,6 @@ def distance_function_for_maze_task(log_params, D, B, num_layers,  num_timescale
     log_scales = log_params[num_timescales:][np.newaxis,np.newaxis,:]
     
     F = np.zeros(D.shape[:2] + (num_layers,) + D.shape[3:],dtype=float);
-    basemeasure_scale = np.zeros((D.shape[0], num_layers))
 
     distances = np.abs(D[:,:,[0],...])
     timescale_inds = D[:,:,[1],...]
@@ -27,6 +27,7 @@ def distance_function_for_maze_task(log_params, D, B, num_layers,  num_timescale
     F += distances
     F = np.exp(F)
     
+    basemeasure_scale = np.zeros((B.shape[0], num_layers))
     if(len(log_scales) > 0):
         basemeasure_scale = np.exp(np.sum(B * log_scales,axis=2))
     else:
@@ -87,30 +88,34 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike, action
 
     B = np.zeros((total_observations, len(actions), nback_scales))
 
-    variable_names += [{"type" : "trial_timeconstant", "label" : ALL_BLOCK_TYPES}]
-    variable_names += [{"type" : "trial_timeconstant", "label" : block_types[bb]}]
-    variable_names += [{"type" : "session_timeconstant", "from" : block_types[bb_end], "to" : block_types[bb_start]}]
 
     within_session_parameter_num  = np.zeros((len(B)), dtype=int)-1
     between_session_parameter_num = np.zeros((len(B), len(B)), dtype=int)-1
 
-    for session_num_to, seq_to in enumerate(seqs):
-        to_idx = np.arange(0,session_lengths[seq_to]) + session_start_indexes[seq_to]
-        to_block_idx = np.where(B == block_ids[session_num_to])[0]
+    for session_num_to in range(len(seqs)):
+        
+        to_block_idx = np.where(block_types == block_ids[session_num_to])[0]
 
-        for session_num_from, seq_from in enumerate(seqs[:(session_num_to)]):
-            from_block_idx = np.where(B == block_ids[session_num_from])[0]
+        for session_num_from in range(session_num_to):
+            from_block_idx = np.where(block_types == block_ids[session_num_from])[0]
+
+            to_from_idx_0 = np.s_[session_start_indexes[session_num_to]:session_start_indexes[session_num_to+1], session_start_indexes[session_num_from]:session_start_indexes[session_num_from+1],0 ]
+            to_from_idx_1 = np.s_[session_start_indexes[session_num_to]:session_start_indexes[session_num_to+1], session_start_indexes[session_num_from]:session_start_indexes[session_num_from+1],1 ]
+
 
             if(between_session_parameter_num[to_block_idx, from_block_idx] < 0):
                 variable_names += [{"type" : "session_timeconstant", "from" : block_types[from_block_idx], "to" : block_types[to_block_idx]}]
                 between_session_parameter_num[to_block_idx, from_block_idx] = variable_ctr
                 variable_ctr += 1
 
-            from_idx = range(0,session_lengths[seq_from]) + session_start_indexes[seq_from]
-            D[to_idx, from_idx, 0] = session_num_to-session_num_from
-            D[to_idx, from_idx, 1] = between_session_parameter_num[to_block_idx, from_block_idx]
+            D[to_from_idx_0] = session_num_to-session_num_from
+            D[to_from_idx_1] = between_session_parameter_num[to_block_idx, from_block_idx]
 
         # within session
+        to_idx_0 = np.s_[session_start_indexes[session_num_to]:session_start_indexes[session_num_to+1], session_start_indexes[session_num_to]:session_start_indexes[session_num_to+1],0 ]
+        to_idx_1 = np.s_[session_start_indexes[session_num_to]:session_start_indexes[session_num_to+1], session_start_indexes[session_num_to]:session_start_indexes[session_num_to+1],1 ]
+
+
         if(within_session_parameter_num[to_block_idx] < 0):
             if(distinct_within_session_distance_params):
                 variable_names += [{"type" : "trial_timeconstant", "label" : block_types[to_block_idx]}]
@@ -121,131 +126,95 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike, action
                 within_session_parameter_num[:] = variable_ctr
                 variable_ctr += 1
 
-        ds = np.maximum(to_idx[:,np.newaxis] - to_idx[np.newaxis,:], 0);
-        D[to_idx, to_idx, 0] = ds
-        cs = np.ones(len(to_idx),len(to_idx)) * within_session_parameter_num[to_block_idx]
+        ds = np.arange(session_start_indexes[session_num_to], session_start_indexes[session_num_to+1])
+        ds = np.maximum(ds[:,np.newaxis] - ds[np.newaxis,:], 0);
+        D[to_idx_0] = ds
+        cs = np.ones_like(ds) * within_session_parameter_num[to_block_idx]
         cs[ds <= 0] = -1;
-        D[to_idx, to_idx, 1] = ds
+        D[to_idx_1] = cs
 
     num_timeconstants = variable_ctr
 
+
+    Y = np.concatenate([np.array(ss).flatten() for ss in seqs])
     for nback in range(1,nback_scales+1):
 
-        variable_names += [{"type" : "nback_scales", "label" : "weight_same_" + str(nback) + "_back"}]
+        variable_names += [{"type" : "nback_scales", "label" :  nback}]
         variable_ctr += 1
 
-        for session_num_to, seq_to in enumerate(seqs):
-            to_idx = np.arange(0,session_lengths[seq_to]) + session_start_indexes[seq_to]
-            
-            prev_seq = np.roll(seq_to,nback)[:,np.newaxis]
-            prev_seq[:nback] = np.iinfo(np.int64).min 
-            seq_to = np.array(seq_to)[:,np.newaxis];
-            vv = prev_seq.T == seq_to;
-            vv = np.tril(vv,-1)
-            D[to_idx, to_idx, 1 + nback] = ds
 
-            for ii, action in enumerate(actions):
-                B[to_idx,ii,nback-1] = prev_seq == action
-    B = np.sum(B,axis=2)
+        seqs_c = [np.roll(np.array(ss).flatten(),nback) for ss in seqs]
+        for ss in seqs_c:
+            ss[:nback] = np.iinfo(np.int64).min 
+        Y_prev = np.concatenate([np.array(ss).flatten() for ss in seqs_c])
+
+        
+        vv = Y[:np.newaxis] == Y_prev[np.newaxis,:];
+        vv = np.tril(vv,-1)
+        D[:, :, 1 + nback] = vv
+
+        for ii, action in enumerate(actions):
+            B[:,ii,nback-1] = Y_prev == action
+
     return (D,  B, variable_names, num_timeconstants)
 
 def parameter_vectorizer_for_distance_matrix(variable_names, session_types, within_session_time_constant = 50, between_session_time_constants = 10, nback_scales = 1):
     ## set up parameters in a specific vectorized form
-    within_session_vars  = [xx for xx in variable_names if xx["type"] == "trial_timeconstant"];
-    between_session_vars = [xx for xx in variable_names if xx["type"] == "session_timeconstant"];
-    nback_scales_vars = [xx for xx in variable_names if xx["type"] == "nback_scales"];
     # param_names = ["" for xx in range(len(within_session_vars) + len(between_session_vars)*2)];
-    param_names = ["" for xx in range(len(within_session_vars) + len(between_session_vars) + len(nback_scales_vars))];
 
-    params_vector = np.zeros((len(param_names)))
-    is_within_timescale = np.zeros((len(param_names)), dtype=bool)
-    is_between_timescale = np.zeros((len(param_names)), dtype=bool)
-    is_nback_scale = np.zeros((len(param_names)), dtype=bool)
+    params_vector = np.zeros((len(variable_names)))
+    is_within_timescale = np.zeros((len(variable_names)), dtype=bool)
+    is_between_timescale = np.zeros((len(variable_names)), dtype=bool)
+    is_nback_scale = np.zeros((len(variable_names)), dtype=bool)
 
     unique_session_types = np.unique(session_types);
 
-    ctr = 0;
-    for var in within_session_vars:
-        if(var["label"] == ALL_BLOCK_TYPES):
-            pos = 0;
-            param_names[ctr] = "within_session_time_constant"
-        else:
-            pos = np.where(unique_session_types == var["label"])[0][0];
-            param_names[ctr] = "within_session_" + str(var["label"]) + "_time_constant"
+    param_names = []
 
-        if(np.isscalar(within_session_time_constant)):
-            params_vector[ctr] = within_session_time_constant
-        else:
-            params_vector[ctr] = within_session_time_constant[pos]
-        is_within_timescale[ctr] = True
 
-        ctr += 1
-    
-    for from_label in unique_session_types:
-        pos_from = np.where(unique_session_types == from_label)[0][0];
-        pos_to = pos_from
-        # if within group exists
-        between_session_vars = [xx for xx in variable_names if xx["scale"] == "session" and xx["to"] == from_label and xx["from"] == from_label];
-        if(len(between_session_vars) > 0):
-            param_names[ctr] = str(between_session_vars[0]["from"]) + "_to_" + str(between_session_vars[0]["to"]) + "_session_time_constant";
-
-            if(np.isscalar(between_session_time_constants)):
-                params_vector[ctr] = between_session_time_constants
-            else:
-                params_vector[ctr] = between_session_time_constants[pos_from,pos_to]
-            is_between_timescale[ctr] = True
-            ctr += 1
-
-    for from_label in unique_session_types:
-        pos_from = np.where(unique_session_types == from_label)[0][0];
-        for to_label in unique_session_types:
-            pos_to = np.where(unique_session_types == to_label)[0][0];
-
-            if(to_label == from_label):
-                continue;
-            
-            between_session_vars = [xx for xx in variable_names if xx["scale"] == "session" and xx["to"] == to_label and xx["from"] == from_label];
-            if(len(between_session_vars) > 0):
-                param_names[ ctr] = str(between_session_vars[0]["from"]) + "_to_" + str(between_session_vars[0]["to"]) + "_session_time_constant";
-                
-                if(np.isscalar(between_session_time_constants)):
-                    params_vector[ctr] = between_session_time_constants
-                else:
-                    params_vector[ctr] = between_session_time_constants[pos_from,pos_to]
-                is_between_timescale[ctr] = True
-                ctr += 1;
-
-        for var in within_session_vars:
+    for var_idx, var in enumerate(variable_names):
+        if(var["type"] == "trial_timeconstant"):
             if(var["label"] == ALL_BLOCK_TYPES):
                 pos = 0;
-                param_names[ctr] = "within_session_time_constant"
+                param_names += ["within_session_time_constant"]
             else:
                 pos = np.where(unique_session_types == var["label"])[0][0];
-                param_names[ctr] = "within_session_" + str(var["label"]) + "_time_constant"
+                param_names += ["within_session_" + str(var["label"]) + "_time_constant"]
 
             if(np.isscalar(within_session_time_constant)):
-                params_vector[ctr] = within_session_time_constant
+                params_vector[var_idx] = within_session_time_constant
             else:
-                params_vector[ctr] = within_session_time_constant[pos]
-            is_within_timescale[ctr] = True
-            ctr += 1
+                params_vector[var_idx] = within_session_time_constant[pos]
+            is_within_timescale[var_idx] = True
+        elif(var["type"] == "session_timeconstant"):
+            pos_from = np.where(unique_session_types == var["from"])[0][0];
+            pos_to = np.where(unique_session_types == var["to"])[0][0];
+            
+            
+            param_names += [str(var["from"]) + "_to_" + str(var["to"]) + "_session_time_constant"];
 
-    for var in nback_scales_vars:
-        param_names[ctr] = "nback_scale_" + str(var["nback"])
+            if(np.isscalar(between_session_time_constants)):
+                params_vector[var_idx] = between_session_time_constants
+            else:
+                params_vector[var_idx] = between_session_time_constants[pos_from,pos_to]
+            is_between_timescale[var_idx] = True
+        elif(var["type"] == "nback_scales"):
 
-        if(np.isscalar(nback_scales)):
-            params_vector[ctr] = nback_scales
+            param_names += ["scale_" + str(var["label"]) + "_back"]
+
+            if(np.isscalar(nback_scales)):
+                params_vector[var_idx] = nback_scales
+            else:
+                params_vector[var_idx] = nback_scales[var["label"]-1]
+            is_nback_scale[var_idx] = True
         else:
-            params_vector[ctr] = nback_scales[var["nback"]-1]
-        is_nback_scale[ctr] = True
-
-        ctr += 1
+            raise ValueError("Unknown paramter type")
     
     return (param_names, params_vector, is_within_timescale, is_between_timescale, is_nback_scale)
 
 # TODO: Function to take a set of sessions and return a hddCRPModel
 def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = None, actions = None,
-        weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None):
+        weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None, fit_nback_scales : bool = True):
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
     if(actions == None):
         actions = np.unique(Y)
@@ -256,9 +225,9 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
     block_starts = np.cumsum(np.array([0] + [np.size(ss) for ss in seqs],dtype=int))
     groupings = create_context_tree(seqs, depth=depth)
 
-    D, B, distance_labels = create_distance_matrix(seqs, block_ids,
+    D, B, distance_labels, num_timescales = create_distance_matrix(seqs, block_ids,
                                                 distinct_within_session_distance_params = True,
-                                                nback_scales = depth-1, actions=actions);
+                                                nback_scales = fit_nback_scales*(depth-1), actions=actions);
 
     # set up distances for predictive distributions
     prefixes = [str(xx) + '-' for xx in actions]
@@ -277,18 +246,19 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
     B_pred = np.zeros((num_contexts, B.shape[1], B.shape[2], len(seqs)))
 
     # get weights for specified observations
-    for ii in range(seqs):
+    for ii in range(len(seqs)):
         seq_idx = range(block_starts[ii],block_starts[ii+1])
         for jj, con in enumerate(contexts):
             seqs_c = [ss.copy() for ss in seqs[:(ii+1)]]
-            seqs_c[-1] = seqs_c[-1] + list(con) + [np.nan]
+            seqs_c[-1] = np.concatenate([np.array(seqs_c[-1]), np.array(list(con)), np.array([np.nan])])
 
             D_c, B_c, *_ = create_distance_matrix(seqs_c, block_ids[:(ii+1)],
                                             distinct_within_session_distance_params = True,
                                             nback_scales = depth-1, actions=actions);
             D_c = D_c[-1,:block_starts[ii+1], :]
-            D_c[seq_idx,:] -= len(con)
-            D_pred[jj, :, :] = D_c
+
+            D_c[block_starts[ii]:block_starts[ii+1],0] -= len(con)
+            D_pred[jj, :block_starts[ii+1], :, ii] = D_c
 
             B_pred[jj, :, :, ii] = B_c[-1,:,:]
     

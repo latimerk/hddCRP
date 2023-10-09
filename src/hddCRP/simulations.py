@@ -118,10 +118,11 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
 
     seqs = [np.zeros((tt),dtype=symbols.dtype) for tt in session_length];
 
-    D, variable_names = create_distance_matrix(seqs, session_types, 
+    D, DB, variable_names, num_timescales = create_distance_matrix(seqs, session_types, 
                         distinct_within_session_distance_params=distinct_within_session_distance_params,
                         nback_scales=depth-1, actions=symbols);
     D[:,:,2:] = 0;
+    DB[...] = 0
 
 
     ## set up parameters in a specific vectorized form
@@ -132,12 +133,10 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
 
     ##
     log_params = np.log(params_vector);
-    num_timescales = np.sum(is_within_timescale) + np.sum(is_between_timescale)
 
 
     T_total = D.shape[0];
     F = np.zeros((T_total, T_total, depth))
-    DB = np.zeros((T_total, M, depth-1))
     B = np.zeros((T_total, M))
     C_y = np.zeros((T_total),dtype=int)
     C_depth = np.zeros((T_total),dtype=int)
@@ -154,12 +153,19 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
                     C_ctx[tt_ctr, dd] = C_y[tt_ctr - dd]
 
                     if(dd > 0):
-                        D[C_y[:tt_ctr] == C_y[tt_ctr - dd],tt_ctr, 1+dd] = 1;
+                        D[tt_ctr, C_y == C_y[tt_ctr - dd], 1+dd] = 1;
                         DB[tt_ctr,C_y[tt_ctr - dd],dd-1] = 1
                 else:
                     C_ctx[tt_ctr, dd] = -2
-            F[tt_ctr,...], B[tt_ctr,...] = distance_function_for_maze_task(log_params, D[:tt_ctr,[tt_ctr],...], DB[[tt_ctr], ...], depth,  num_timescales)
-                
+            D_c = D[[tt_ctr],:tt_ctr,...];
+            DB_c = DB[[tt_ctr], ...];
+            F_c, B_c = distance_function_for_maze_task(log_params, D_c, DB_c, depth,  num_timescales)
+            # print("D_c " + str(D_c.shape))
+            # print("DB_c " + str(DB_c.shape))
+            # print("F_c " + str(F_c.shape))
+            # print("B_c " + str(B_c.shape))
+            F[[tt_ctr],:tt_ctr,:] = F_c
+            B[[tt_ctr],:] = B_c 
             weighted_base_measure = base_measure * B[tt_ctr,...]
             alphas_c = alphas.copy();
             alphas[0] *= weighted_base_measure.sum()
@@ -198,7 +204,7 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
             # store observation 
             seqs[ss][tt] = symbols[C_y[tt_ctr]]
             tt_ctr += 1
-    C = {'C_y' : C_y, 'F' : F, 'D' : D, 'B' : B, 'BD' : BD,'C_ctx' : C_ctx,
+    C = {'C_y' : C_y, 'F' : F, 'D' : D, 'B' : B, 'DB' : DB,'C_ctx' : C_ctx,
          'session_lengths' : session_length, "symbols" : symbols, "alphas" : alphas, "base_measure" : base_measure, 
          "param_vector" : params_vector, "param_names" : param_names, "variable_names" : variable_names, "param_types" : param_types, "C_depth" : C_depth}
     return (seqs, C)
