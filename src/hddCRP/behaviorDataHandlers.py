@@ -13,23 +13,45 @@ ALL_BLOCK_TYPES = "ALL_SESSIONS"
 
 def distance_function_for_maze_task(log_params, D, B, num_layers,  num_timescales):
     timescales = np.exp(log_params[:num_timescales])
-    log_scales = log_params[num_timescales:][np.newaxis,np.newaxis,:]
+    log_scales = log_params[num_timescales:]
+    log_scales = np.reshape(log_scales, (1,1,log_scales.size) + D.shape[3:])
     
     F = np.zeros(D.shape[:2] + (num_layers,) + D.shape[3:],dtype=float);
 
-    distances = np.abs(D[:,:,[0],...])
+    distances_0 = np.abs(D[:,:,[0],...])
+    distances = np.zeros_like(distances_0)
+    distances.fill(-np.inf)
     timescale_inds = D[:,:,[1],...]
     for tt_ind, tt in enumerate(timescales):
-        distances[timescale_inds == tt_ind] = -distances[timescale_inds == tt_ind]/tt
+        distances[timescale_inds == tt_ind] = -distances_0[timescale_inds == tt_ind]/tt
 
     if(D.shape[2] > 2 and len(log_scales) > 0):
-        F[:,:,(num_layers-1):0:-1,...] = np.cumsum(D[:,:,2:,...] * log_scales,axis=2)
+        try:
+            S = np.array([])
+            S = D[:,:,num_layers:1:-1,...] * log_scales[::-1];
+            F[:,:,:num_layers-1,...] = np.cumsum(S,axis=2)
+        except:
+
+            print("S " + str(S.shape))
+            print("F " + str(F.shape))
+            print("F[:,:,(num_layers-1):0:-1,...] " + str(F[:,:,(num_layers-1):0:-1,...].shape))
+            print("D[:,:,2:,...] " + str(D[:,:,2:,...].shape))
+            print("D " + str(D.shape))
+            print("log_scales " + str(log_scales.shape))
+            print("log_params " + str(log_params))
+            raise RuntimeError("Error found")
+        
     F += distances
     F = np.exp(F)
     
-    basemeasure_scale = np.zeros((B.shape[0], num_layers))
     if(len(log_scales) > 0):
-        basemeasure_scale = np.exp(np.sum(B * log_scales,axis=2))
+        try:
+            basemeasure_scale = np.exp(np.sum(B * log_scales, axis=2))
+        except:
+
+            print("log_scales " + str(log_scales.shape))
+            print("B " + str(B.shape))
+            raise RuntimeError("Error found")
     else:
         basemeasure_scale = None
 
@@ -77,6 +99,7 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike, action
 
     ##
     D = np.zeros((total_observations, total_observations, 2 + nback_scales))
+    D[:,:,0] = -np.inf
     D[:,:,1] = -1
     variable_ctr = 0;
     variable_names = [];
@@ -126,8 +149,9 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike, action
                 within_session_parameter_num[:] = variable_ctr
                 variable_ctr += 1
 
-        ds = np.arange(session_start_indexes[session_num_to], session_start_indexes[session_num_to+1])
-        ds = np.maximum(ds[:,np.newaxis] - ds[np.newaxis,:], 0);
+        ds = np.arange(session_start_indexes[session_num_to], session_start_indexes[session_num_to+1], dtype=float)
+        ds = ds[:,np.newaxis] - ds[np.newaxis,:];
+        ds[ds <= 0] = -np.inf
         D[to_idx_0] = ds
         cs = np.ones_like(ds) * within_session_parameter_num[to_block_idx]
         cs[ds <= 0] = -1;
@@ -143,18 +167,23 @@ def create_distance_matrix(seqs : list[ArrayLike], block_ids : ArrayLike, action
         variable_ctr += 1
 
 
-        seqs_c = [np.roll(np.array(ss).flatten(),nback) for ss in seqs]
+        seqs_c = [np.roll(np.array(ss,dtype=object).flatten(),nback) for ss in seqs]
         for ss in seqs_c:
-            ss[:nback] = np.iinfo(np.int64).min 
+            ss[:nback] = np.nan 
         Y_prev = np.concatenate([np.array(ss).flatten() for ss in seqs_c])
 
         
-        vv = Y[:np.newaxis] == Y_prev[np.newaxis,:];
+        vv = Y_prev[:,np.newaxis] == Y[np.newaxis,:];
         vv = np.tril(vv,-1)
         D[:, :, 1 + nback] = vv
 
-        for ii, action in enumerate(actions):
-            B[:,ii,nback-1] = Y_prev == action
+        for ii, action in enumerate(actions.astype(Y.dtype)):
+            B[:,ii,nback-1] = (Y_prev == action)
+            # print(Y_prev == action)
+            # print(Y_prev )
+            # print(Y )
+            # print(action)
+            # raise RuntimeError("Here!")
 
     return (D,  B, variable_names, num_timeconstants)
 
@@ -279,7 +308,7 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
 
     weight_func =  lambda D, B, log_params, num_layers : distance_function_for_maze_task(log_params, D, B, num_layers,  num_timescales)
 
-    model = sequentialhddCRPModel(Y, groupings, alpha_0, D,
+    model = sequentialhddCRPModel(Y, groupings, alpha_0, D=D, B=B,
                        weight_params=np.log(params_vector),  weight_param_labels=param_names, weight_func=weight_func, rng=rng)
     model._param_types = param_types
     model._block_ends  = block_ends

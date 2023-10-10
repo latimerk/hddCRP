@@ -139,6 +139,7 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
     F = np.zeros((T_total, T_total, depth))
     B = np.zeros((T_total, M))
     C_y = np.zeros((T_total),dtype=int)
+    C_y[:] = -1
     C_depth = np.zeros((T_total),dtype=int)
     C_ctx = np.zeros((T_total, depth),dtype=int)
     C_ctx.fill(-1)
@@ -168,13 +169,13 @@ def simulate_sequential_hddCRP(session_length : int | ArrayLike, session_types :
             B[[tt_ctr],:] = B_c 
             weighted_base_measure = base_measure * B[tt_ctr,...]
             alphas_c = alphas.copy();
-            alphas[0] *= weighted_base_measure.sum()
+            alphas_c[0] *= weighted_base_measure.sum()
             weighted_base_measure /= weighted_base_measure.sum()
 
             for dd in range(depth-1,-1,-1):
 
 
-                if(not np.isinf(alphas[dd])):
+                if(not np.isinf(alphas_c[dd])):
                     # find all previous nodes with matching context at current depth
                     nodes_with_same_context = np.where(np.all(C_ctx[:(tt_ctr),:(dd+1)] == C_ctx[tt_ctr,:(dd+1)], axis=1))[0]
                     
