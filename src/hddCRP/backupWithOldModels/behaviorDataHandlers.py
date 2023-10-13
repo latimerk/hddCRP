@@ -11,8 +11,6 @@ from hddCRP.modelFitting import log_prior_for_maze_task, complete_constant_dista
 EMPTY_INDICATOR = "NULL"
 ALL_BLOCK_TYPES = "ALL_SESSIONS"
 
-
-
 # TODO: Function to get tree of groups for time series of actions
 def create_context_tree_single_session(seq : ArrayLike, depth : int = 3, delim : str = "-") -> np.ndarray:
     depth = int(depth)
@@ -227,10 +225,12 @@ def parameter_vectorizer_for_distance_matrix(variable_names, session_types, with
 
 # TODO: Function to take a set of sessions and return a hddCRPModel
 def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3, alpha_0 : float | ArrayLike = None,
-        weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None, sequential_distances_only : bool = True, include_timescales=True ):
+        weight_params_0 : float | ArrayLike = None, rng : np.random.Generator = None, sequential_distances_only : bool = True, include_timescales=True, Y_values = None ):
     if(not sequential_distances_only):
         raise NotImplementedError("Sequential distances only in this model")
     Y = np.concatenate([np.array(ss).flatten() for ss in seqs], axis=0)
+    if(Y_values is None):
+        Y_values = np.unique(Y)
     block_ends = np.cumsum(np.array([np.size(ss) for ss in seqs],dtype=int))-1
     groupings = create_context_tree(seqs, depth=depth)
     D_0, distance_labels = create_distance_matrix(seqs, block_ids,
@@ -271,6 +271,7 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
         param_names = []
         params_vector = np.array([])
 
+ 
     model = sequentialhddCRPModel(Y, groupings, alpha_0, D,
                        weight_params=np.log(params_vector),  weight_param_labels=param_names, weight_func=complete_weight_func, rng=rng)
     model._param_types = param_types
@@ -280,9 +281,15 @@ def create_hddCRP(seqs : list[ArrayLike], block_ids : ArrayLike, depth : int = 3
     model._block_ends = block_ends
     return model
 
+
+
+
 def setup_transition_probability_computations(model : sequentialhddCRPModel, observation_indices=None):
-    prefixes = [str(xx) + '-' for xx in np.unique(model._Y)]
+    prefixes = [str(xx) + '-' for xx in model._Y_values]
     combinations = list(product(prefixes,repeat=model.num_layers-1))
+    
+    prefixes_idx = [int(xx) for xx in range(len(model.M))]
+    combinations_idx = list(product(prefixes_idx,repeat=model.num_layers-1))
 
     groups_at_each_level = [[]] * model.num_layers
     groups_at_each_level[0] = ['' for xx in combinations]
@@ -290,6 +297,7 @@ def setup_transition_probability_computations(model : sequentialhddCRPModel, obs
         groups_at_each_level[ii] = [''.join(xx[-ii:]) for xx in combinations]
 
     contexts = [''.join(xx) for xx in combinations]
+    n_contexts = len(contexts);
 
     # get weights for specified observations
     if(observation_indices is None):
@@ -304,9 +312,11 @@ def setup_transition_probability_computations(model : sequentialhddCRPModel, obs
         weight_func = lambda weight_params : complete_exponential_distance_function_for_maze_task(D_new, weight_params, inds_new, model._weight_function_setup["timescale_inds"],model._weight_function_setup["constant_scale_inds"])
     else:
         weight_func = lambda weight_params : complete_constant_distance_function_for_maze_task(D_new, weight_params)
+
     
     model._D_predictive = D_new;
     model.setup_transition_probability_computations(groups_at_each_level, weight_func)
+
     return model, contexts, observation_indices
 
 
