@@ -921,11 +921,12 @@ model {
 
 
 
-def generate_stan_code_individual(num_within_session_timeconstants : int, num_session_interaction_types : int, context_depth : int, nback_depth : int) -> str:
-    num_session_interaction_types = max(0, int(num_session_interaction_types))
-    num_within_session_timeconstants = max(0, int(num_within_session_timeconstants))
+def generate_stan_code_individual(within_session_timeconstants : list, session_interaction_types : list, context_depth : int, nback_depth : int) -> str:
     context_depth = max(0, int(context_depth))
     nback_depth = max(0, int(nback_depth))
+
+    within_session_timeconstants = [str(ss).replace(' ', '_') for ss in within_session_timeconstants]
+    session_interaction_types = [str(ss).replace(' ', '_') for ss in session_interaction_types]
 
     assert nback_depth <= 1, "can't generate model with nback biases greater than 1"
     lb = "{"
@@ -938,13 +939,14 @@ data {
     array[N] int Y;
     array[N] int local_timeconstant_id;
     array[N] int session_id;
+    array[N] real local_time;
 
     real prior_alpha_shape;
     real prior_alpha_scale;
                 """
     
-    for ii in range(1,num_session_interaction_types+1):
-         data_block += f"""    array[N] real session_time_{ii};"""
+    for ii in session_interaction_types:
+         data_block += f"""    array[N,2] real session_time_{ii}; # column 1: projecting time, column 2: receiving time; if negative, doesn't do either"""
     
 
     for ii in range(1,context_depth+1):
@@ -1001,11 +1003,11 @@ transformed data {
     }
 
 """
-    for ii in range(1,nu,num_within_session_timeconstants+1):
+    for ii in within_session_timeconstants:
         transformed_data_block += f"""    matrix[N,N] deltas_{ii};
 """
         
-    for ii in range(1,num_session_interaction_types+1):
+    for ii in session_interaction_types:
         transformed_data_block += f"""    matrix[N,N] deltas_session_{ii};
 """
         
@@ -1013,18 +1015,20 @@ transformed data {
         for (bb in 1:N) {
 """
 
-    for ii in range(1,num_session_interaction_types+1):
-            transformed_data_block += f"""            if((bb < aa) && (local_timeconstant_id[aa] == ii) && (local_timeconstant_id[bb] == ii) && (session_id[aa] == session_id[bb])) {lb}
-                deltas_{ii}[aa,bb] = aa - bb;
+    for ii in session_interaction_types:
+            transformed_data_block += f"""
+            if((bb < aa) && (local_timeconstant_id[aa] == ii) && (local_timeconstant_id[bb] == ii) && (session_id[aa] == session_id[bb])) {lb}
+                deltas_{ii}[aa,bb] = local_time[aa]-local_time[bb];
             {rb}
             else {lb}
                 deltas_{ii}[aa,bb] = 0;
             {rb}
             """
 
-    for ii in range(1,num_session_interaction_types+1):
-            transformed_data_block += f"""            if((bb < aa) && (session_time[aa] > 0) && (session_time_{ii}[bb] > 0)) {lb}
-                deltas_session_{ii}[aa,bb] = session_time[aa]-session_time[bb];
+    for ii in session_interaction_types:
+            transformed_data_block += f"""
+            if((bb < aa) && (session_time_{ii}[aa,2] > 0) && (session_time_{ii}[bb,1] > 0)) {lb}
+                deltas_session_{ii}[aa,bb] = session_time_{ii}[aa,2]-session_time_{ii}[bb,1];
             {rb}
             else {lb}
                 deltas_session[aa,bb] = 0;
@@ -1081,11 +1085,11 @@ transformed data {
     parameters_block = """parameters {
     real log_alpha_n;   
     real log_timeconstant_within_session_n; """
-    for ii in range(1,num_within_session_timeconstants+1): 
+    for ii in within_session_timeconstants: 
         parameters_block += """    real log_timeconstant_within_session_{ii}_n;
 """
 
-    for ii in range(1,num_session_interaction_types+1): 
+    for ii in session_interaction_types: 
         parameters_block += """    real log_timeconstant_between_sessions_{ii}_n;
 """
 
@@ -1107,7 +1111,7 @@ transformed parameters {
     log_alpha = log_alpha_n  + prior_alpha_scale_log;
     alpha     = exp(log_alpha);
 """
-    for ii in range(1,num_within_session_timeconstants+1): 
+    for ii in within_session_timeconstants: 
         transformed_parameters_block += f"""
     real          log_timeconstant_within_session_{ii};  
     real<lower=0> timeconstant_within_session_{ii};     
@@ -1116,7 +1120,7 @@ transformed parameters {
 """
 
 
-    for ii in range(1,num_session_interaction_types+1): 
+    for ii in session_interaction_types: 
         transformed_parameters_block += f"""    real          log_timeconstant_between_sessions_{ii};    
     real<lower=0> timeconstant_between_sessions_{ii};    
     log_timeconstant_between_sessions_{ii} = log_timeconstant_between_sessions_{ii}_n + prior_timeconstant_between_sessions_scale_log;
@@ -1157,11 +1161,11 @@ transformed parameters {
     alpha                         ~ gamma(prior_alpha_shape,                         prior_alpha_scale_inv);
     """
 
-    for ii in range(1, num_within_session_timeconstants+1):
+    for ii in within_session_timeconstants:
         model_block += f"""    timeconstant_within_session_{ii}   ~ gamma(prior_timeconstant_within_session_shape,   prior_timeconstant_within_session_scale_inv);
     """
 
-    for ii in range(1, num_session_interaction_types+1):
+    for ii in session_interaction_types:
         model_block += f"""    timeconstant_between_sessions_{ii} ~ gamma(prior_timeconstant_between_sessions_shape, prior_between_sessions_scale_inv);
     """
 
@@ -1174,11 +1178,11 @@ transformed parameters {
     """
     model_block += "    weights_all_obs   = is_prev_observation .* exp("
     
-    for ii in range(1, num_within_session_timeconstants+1):
+    for ii in within_session_timeconstants:
         model_block += f"""                                                   - deltas/timeconstant_within_session_{ii}
 """
 
-    for ii in range(1, num_session_interaction_types+1):
+    for ii in session_interaction_types:
         model_block += f"""                                                   - deltas_session_{ii}/timeconstant_within_session_{ii}
 """
         
@@ -1202,3 +1206,4 @@ transformed parameters {
     stan_model = data_block + transformed_data_block + parameters_block + transformed_parameters_block + model_block
 
     return stan_model
+

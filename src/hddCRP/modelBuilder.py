@@ -219,6 +219,8 @@ class cdCRP():
         if(self.sessions_per_subject > 0):
             raise NotImplementedError("Multisession models cannot been created yet.")
         
+        self.distinct_session_within_session_timeconstants = True
+
         self.posterior = None;
         self.fit = None;
 
@@ -261,6 +263,16 @@ class cdCRP():
     def total_observations(self) -> int:
         return np.sum(self.session_lengths)
     
+    
+    @property
+    def distinct_session_within_session_timeconstants(self) -> bool:
+        if(~hasattr(self, "_distinct_session_within_session_timeconstants")):
+            self._distinct_session_within_session_timeconstants = True;
+        return self._distinct_session_within_session_timeconstants
+    @distinct_session_within_session_timeconstants.setter
+    def distinct_session_within_session_timeconstants(self, distinct_time_constants : bool) -> None:
+        self._distinct_session_within_session_timeconstants = distinct_time_constants
+    
     @property
     def M(self) -> int:
         return self.possible_observations.size
@@ -285,17 +297,20 @@ class cdCRP():
         self.priors.nback_depth = nd
     
     
-    def setup_compact_sequences(self, flatten=True) -> list[np.ndarray[int]]:
+    def setup_compact_sequences(self, flatten : bool = True) -> list[np.ndarray[int]]:
         v = np.arange(1,self.M+1).astype(int);
         seqs = [(np.array(ss)[:,np.newaxis] == self.possible_observations[np.newaxis,:]) @ v for ss in self.sequences]
         if(flatten):
-            seqs = np.concatenate(seqs);
+            if(self.is_population):
+                raise NotImplementedError("population setup doesn't work yet")
+            else:
+                seqs = np.concatenate(seqs);
         return seqs;
 
     def flatten_sequences(self) -> list[np.ndarray[int]]:
         return np.concatenate([np.array(cc, dtype='object').flatten() for cc in self.sequences]);
 
-    def setup_contexts(self, depth : int, flatten=True) -> np.ndarray:
+    def setup_contexts(self, depth : int, flatten : bool = True) -> np.ndarray:
         depth = int(depth)
         assert depth > 0, "depth must be positive integer"
 
@@ -303,22 +318,120 @@ class cdCRP():
         for seq in self.sequences:
             contexts += [[UNKNOWN_OBSERVATION()] * depth + [tuple(seq[ss-depth:ss]) for ss in range(len(seq))]];
         if(flatten):
-            contexts = np.concatenate([np.array(cc, dtype='object').flatten() for cc in contexts]);
+            if(self.is_population):
+                raise NotImplementedError("population setup doesn't work yet")
+            else:
+                contexts = np.concatenate([np.array(cc, dtype='object').flatten() for cc in contexts]);
 
         return contexts;
 
-    def setup_nback(self, depth : int, flatten=True) -> np.ndarray:
+    def setup_nback(self, depth : int, flatten : bool = True) -> np.ndarray:
         contexts = [];
         for seq in self.sequences:
             contexts += [[UNKNOWN_OBSERVATION()] * depth + [seq[ss] for ss in range(len(seq))]];
         if(flatten):
-            contexts = np.concatenate([np.array(cc, dtype='object').flatten() for cc in contexts]);
+            if(self.is_population):
+                raise NotImplementedError("population setup doesn't work yet")
+            else:
+                contexts = np.concatenate([np.array(cc, dtype='object').flatten() for cc in contexts]);
         return contexts;
 
 
+    def setup_local_time(self, flatten : bool = True) -> np.ndarray:
+        times = [];
+        for ss in self.session_lengths:
+            times += [np.arange(1,ss+1)]];
+        if(flatten):
+            if(self.is_population):
+                raise NotImplementedError("population setup doesn't work yet")
+            else:
+                times = np.concatenate([np.array(cc, dtype='object').flatten() for cc in times]);
+        return times;
+
+
+    def get_within_session_timeconstant_labels(self) -> list[str]:
+        if(~self.distinct_session_within_session_timeconstants):
+            return ["ALL"]
+        else:
+            return [str(ss) for ss in self.session_types]
+        
+    def setup_within_session_time_constant_ids(self, flatten : bool = True) -> np.ndarray[int]:
+        time_constant_id = [np.ones(ss,dtype=int) for ss in self.session_lengths]
+        if(self.distinct_session_within_session_timeconstants):
+            for ii, session_type in enumerate(self.session_types):
+                for jj, label_c in enumerate(self.session_labels):
+                    if(label_c == session_type):
+                        time_constant_id[jj][:] = ii+1
+        if(flatten):
+            if(self.is_population):
+                raise NotImplementedError("population setup doesn't work yet")
+            else:
+                time_constant_id = np.concatenate(time_constant_id);
+        return time_constant_id
+
+
+    def setup_session_ids(self, flatten : bool = True) -> np.ndarray[int]:
+        session_id = [np.ones(ss,dtype=int)+ii for ii,ss in enumerate(self.session_lengths)]
+        if(flatten):
+            if(self.is_population):
+                raise NotImplementedError("population setup doesn't work yet")
+            else:
+                session_id = np.concatenate(session_id);
+        return session_id
+
+    def get_all_interaction_types(self) -> list[tuple]:
+        interaction_types = []
+        is_same_subject      = self.subject_labels[:,np.newaxis] == self.subject_labels[np.newaxis,:]
+        is_before            = self.session_times[ :,np.newaxis] <  self.session_times[np.newaxis,:]
+        possible_interaction = is_same_subject & is_before
+
+        for aa in self.session_types:
+            aa_i = np.where(self.session_labels == aa)[0]
+            for bb in self.session_types:
+                if(aa != bb):
+                    bb_i = np.where(self.session_labels == bb)[0]
+
+                    if(np.any(possible_interaction[aa_i,bb_i])):
+                        interaction_types += [(aa,bb)]
+        return interaction_types;
+
+    def _to_interaction_name(self, types : tuple[str,str]) -> str:
+        from_type = types[0]
+        to_type   = types[1]
+        return str(from_type).replace(' ', '_') + "_to_" + str(to_type).replace(' ', '_')
+
+
+    def setup_session_interaction_times(self, concatenate : bool = True):
+        interaction_timings = {}
+        # column 1: projecting time, column 2: receiving time
+        for from_type, to_type in self.get_all_interaction_types():
+            interaction_name = "session_time_" + self._to_interaction_name((from_type, to_type))
+            interaction_timings[interaction_name] = [np.zeros((ss, 2))-1  for ss in self.session_lengths];
+
+            for session_num, session_type in enumerate(self.session_labels):
+                if(session_type == from_type):
+                    interaction_timings[interaction_name][session_num][:,0] = self.session_times[session_num]
+                if(session_type == to_type):
+                    interaction_timings[interaction_name][session_num][:,1] = self.session_times[session_num]
+
+        if(concatenate):
+            if(self.is_population):
+                raise NotImplementedError("population setup doesn't work yet")
+            else:
+                for kk in interaction_timings.keys()
+                    interaction_timings[kk] = np.concatenate(interaction_timings[kk], axis=0);
+        return interaction_timings
+                
+
     def __dict__(self):
+        if(self.is_population):
+            raise NotImplementedError("population setup doesn't work yet")
+        
         data = {"N" : self.total_observations, "M" : self.M, "T" : np.max(self.observations_per_subject),
-                "Y" : self.setup_compact_sequences(flatten=True)}
+                "Y" : self.setup_compact_sequences(flatten=True),
+                "local_time" : self.setup_local_time(flatten=True),
+                "local_timeconstant_id" : self.setup_within_session_time_constant_ids(flatten=True),
+                "session_id" : self.setup_session_ids(flatten=True)}
         
         for depth in range(1, self.context_depth):
             contexts = self.setup_contexts(depth);
@@ -330,6 +443,8 @@ class cdCRP():
             nback = self.setup_nback(depth);
             match = base[:,np.ndarray] == nback[np.ndarray,:]
             data[f"is_same_context_{depth}"] = np.tril(match)
+
+        data.update(self.setup_session_interaction_times())
 
         data.update(dict(self.priors))
         return data;
@@ -359,9 +474,10 @@ class cdCRP():
 
 
         if(not pop_model):
-            num_session_interaction_types = self.num_session_types
+            session_interaction_types = self.get_all_interaction_types()
+            within_session_timeconstants = self.get_within_session_timeconstant_labels()
 
-            return stanModels.generate_stan_code_individual(num_session_interaction_types=num_session_interaction_types, context_depth=self.context_depth, nback_depth=self.nback_depth);
+            return stanModels.generate_stan_code_individual(session_interaction_types=session_interaction_types, within_session_timeconstants=within_session_timeconstants, context_depth=self.context_depth, nback_depth=self.nback_depth);
 
             # if(self.num_sessions == 1):
             #     if(repeat_depth == 0):
