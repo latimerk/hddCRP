@@ -245,6 +245,9 @@ class cdCRP():
     @property
     def session_types(self) -> list[int]:
         return np.unique(self.session_labels);
+    @property
+    def num_session_types(self) -> list[int]:
+        return len(self.session_types);
 
     @property
     def subjects(self) -> list[int]:
@@ -354,46 +357,56 @@ class cdCRP():
         model_str += f"context_{context_depth}" 
         model_str += f"repeat_{repeat_depth}" 
 
+
         if(not pop_model):
-            if(self.num_sessions == 1):
-                if(repeat_depth == 0):
-                    if(context_depth == 0):
-                        return stanModels.model_individual_session_context_0_repeat_0
-                    elif(context_depth == 1):
-                        return stanModels.model_individual_session_context_1_repeat_0
-                    elif(context_depth == 2):
-                        return stanModels.model_individual_session_context_2_repeat_0
-                    else:
-                        raise NotImplementedError("No models with context depth > 2: " + model_str )
-                elif(repeat_depth == 1):
-                    if(context_depth == 0):
-                        return stanModels.model_individual_session_context_0_repeat_1
-                    elif(context_depth == 1):
-                        return stanModels.model_individual_session_context_1_repeat_1
-                    elif(context_depth == 2):
-                        return stanModels.model_individual_session_context_2_repeat_1
-                    else:
-                        raise NotImplementedError("No models with context depth > 2: " + model_str )
-                else:
-                    raise NotImplementedError("No models with repeat depth > 1: " + model_str )
-            else:
-                raise NotImplementedError("No multisession models yet: " + model_str )
+            num_session_interaction_types = self.num_session_types
+
+            return stanModels.generate_stan_code_individual(num_session_interaction_types=num_session_interaction_types, context_depth=self.context_depth, nback_depth=self.nback_depth);
+
+            # if(self.num_sessions == 1):
+            #     if(repeat_depth == 0):
+            #         if(context_depth == 0):
+            #             return stanModels.model_individual_session_context_0_repeat_0
+            #         elif(context_depth == 1):
+            #             return stanModels.model_individual_session_context_1_repeat_0
+            #         elif(context_depth == 2):
+            #             return stanModels.model_individual_session_context_2_repeat_0
+            #         else:
+            #             raise NotImplementedError("No models with context depth > 2: " + model_str )
+            #     elif(repeat_depth == 1):
+            #         if(context_depth == 0):
+            #             return stanModels.model_individual_session_context_0_repeat_1
+            #         elif(context_depth == 1):
+            #             return stanModels.model_individual_session_context_1_repeat_1
+            #         elif(context_depth == 2):
+            #             return stanModels.model_individual_session_context_2_repeat_1
+            #         else:
+            #             raise NotImplementedError("No models with context depth > 2: " + model_str )
+            #     else:
+            #         raise NotImplementedError("No models with repeat depth > 1: " + model_str )
+            # else:
+            #     if(self.num_session_types == 1):
+            #         raise NotImplementedError("No multisession models with different session labels yet: " + model_str )
         else:
             raise NotImplementedError("No population models yet: " + model_str )
         
 
     def build(self, random_seed : int) -> stan.model.Model:
         self.posterior = stan.build(self.model, data=self.data, random_seed=int(random_seed))
+        self.posterior.random_seed
 
-    def fit(self, num_chains : int = 4, num_samples=1000) -> stan.fit.Fit:
+    def fit(self, num_chains : int = 4, num_samples : int = 1000, random_seed : int = None) -> stan.fit.Fit:
         if(self.posterior is None):
-            raise ValueError("Model not built yet!")
+            if(not (random_seed is None)):
+                self.build(random_seed=random_seed);
+            else:
+                raise ValueError("Model not built yet!")
         
         num_chains = int(num_chains)
         num_samples = int(num_samples)
 
-        assert num_chains > 0, "must have positive number of chains for sampling"
-        assert num_samples > 0, "must have positive number of samples"
+        assert num_chains  > 0, "must have positive number of chains for sampling"
+        assert num_samples > 0, "must have positive number of samples per chain"
 
         self.fit = self.posterior.sample(num_chains=num_chains, num_samples=num_samples)
         return self.fit;
