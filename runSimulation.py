@@ -96,8 +96,8 @@ elif(simulation_id == 2):
     uniform_prior = False
     min_blocks_per_type = 1
     max_blocks_per_type = 10;
-    prior_scales = {"alpha" : 5, "tau_within" : 25, "tau_between" : 5}
-    prior_shapes = {"alpha" : 2, "tau_within" :  2, "tau_between" : 2}
+    prior_scales = {"alpha" : 5, "tau_within" : 25, "tau_between" : 5, "nback" : 1/20}
+    prior_shapes = {"alpha" : 2, "tau_within" :  2, "tau_between" : 2, "nback" : 20}
 
     use_nonsequential_filter_model = False
     single_concentration_parameter = False;
