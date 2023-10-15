@@ -943,10 +943,11 @@ data {
 
     real prior_alpha_shape;
     real prior_alpha_scale;
-                """
+"""
     
     for ii in session_interaction_types:
-         data_block += f"""    array[N,2] real session_time_{ii}; # column 1: projecting time, column 2: receiving time; if negative, doesn't do either"""
+         data_block += f"""    array[N,2] real session_time_{ii}; # column 1: projecting time, column 2: receiving time; if negative, doesn't do either
+"""
     
 
     for ii in range(1,context_depth+1):
@@ -970,18 +971,18 @@ data {
     transformed_data_block = """
 transformed data {
     // variables to turn main computation in matrix operations
-    matrix[N,N] is_same_observation;
-    matrix[N,N] is_prev_observation;
+    matrix[N,N] is_same_observation; # for numerator in CRP likelihood p(y_t | y_1:t-1)
+    matrix[N,N] is_prev_observation; # for denominator in CRP likelihood p(y_t | y_1:t-1)
     for (aa in 1:N) {
         for (bb in 1:N) {
-            if(bb < aa) {
+            if(local_time[bb] < local_time[aa]) {
                 is_prev_observation[aa,bb] = 1;
             }
             else {
                 is_prev_observation[aa,bb] = 0;
             }
 
-            if(bb < aa && Y[aa] == Y[bb]) {
+            if(is_prev_observation[aa,bb] > 0 && Y[aa] == Y[bb]) {
                 is_same_observation[aa,bb] = 1;
             }
             else {
@@ -989,19 +990,12 @@ transformed data {
             }
         }
     }
-    vector[N] Y_is_same_as_one_back = rep_vector(0, N);
-    for (aa in 1:N) {
-        if(is_same_1_back[aa,aa] > 0) {
-            Y_is_same_as_one_back[aa] = 1;
-        }
-    }
-
     // used as a dummy variable to cheaply use the bernoulli log likelihood for inference in this model
-    array[N] int vi ;
+    vector[N] vs = rep_vector(1.0,N);
+    array[N] int vi;
     for (aa in 1:N) {
         vi[aa] = 1;
     }
-
 """
     for ii in within_session_timeconstants:
         transformed_data_block += f"""    matrix[N,N] deltas_{ii};
@@ -1023,7 +1017,7 @@ transformed data {
             else {lb}
                 deltas_{ii}[aa,bb] = 0;
             {rb}
-            """
+"""
 
     for ii in session_interaction_types:
             transformed_data_block += f"""
@@ -1033,34 +1027,44 @@ transformed data {
             else {lb}
                 deltas_session[aa,bb] = 0;
             {rb}
-            """
+"""
     transformed_data_block += """        }
     }
-    """
+"""
     for ii in range(1,context_depth+1):
         transformed_data_block += f"""    matrix[N,N] is_different_context_{ii};
-        """
+"""
 
     if(context_depth > 0):
         transformed_data_block += """
-        for (aa in 1:N) {
-            for (bb in 1:N) {
-        """
+    for (aa in 1:N) {
+        for (bb in 1:N) {
+"""
 
         for ii in range(1,context_depth+1):
             transformed_data_block +=f"""
-                if(bb < aa && is_same_context_{ii}[aa,bb] <= 0) {lb}
-                    is_different_context_{ii}[aa,bb] = 1;
-                {rb}
-                else {lb}
-                    is_different_context_{ii}[aa,bb] = 0;
-                {rb}
+            if(bb < aa && is_same_context_{ii}[aa,bb] <= 0) {lb}
+                is_different_context_{ii}[aa,bb] = 1;
+            {rb}
+            else {lb}
+                is_different_context_{ii}[aa,bb] = 0;
+            {rb}
 """
 
         transformed_data_block += """
-            }
         }
-    """
+    }
+"""
+
+    if(nback_depth > 0):
+        for ii in range(1,nback_depth+1):
+            transformed_data_block += f"""    vector[N] Y_is_same_as_{ii}_back = rep_vector(0, N);
+    for (aa in 1:N) {lb}
+        if(is_same_{ii}_back[aa,aa] > 0) {lb}
+            Y_is_same_as_{ii}_back[aa] = 1;
+        {rb}
+    {rb}
+"""
 
     transformed_data_block += """
     // prior parameter transformations for computations
@@ -1071,10 +1075,10 @@ transformed data {
     real prior_timeconstant_within_session_scale_inv   = 1.0/prior_timeconstant_within_session_scale;
     real prior_timeconstant_between_sessions_scale_log = log(prior_timeconstant_between_sessions_scale);
     real prior_timeconstant_between_sessions_scale_inv = 1.0/prior_timeconstant_between_sessions_scale;
-    """
+"""
 
     for ii in range(1,nback_depth+1):
-        transformed_data_block += """
+        transformed_data_block += f"""
     real prior_repeat_bias_{ii}_back_scale     = 1.0/prior_repeat_bias_1_back_shape;
     real prior_repeat_bias_{ii}_back_scale_inv = prior_repeat_bias_1_back_shape;
     real prior_repeat_bias_{ii}_back_scale_log = log(prior_repeat_bias_1_back_scale);
@@ -1084,21 +1088,22 @@ transformed data {
 
     parameters_block = """parameters {
     real log_alpha_n;   
-    real log_timeconstant_within_session_n; """
+    real log_timeconstant_within_session_n;
+"""
     for ii in within_session_timeconstants: 
-        parameters_block += """    real log_timeconstant_within_session_{ii}_n;
+        parameters_block += f"""    real log_timeconstant_within_session_{ii}_n;
 """
 
     for ii in session_interaction_types: 
-        parameters_block += """    real log_timeconstant_between_sessions_{ii}_n;
+        parameters_block += f"""    real log_timeconstant_between_sessions_{ii}_n;
 """
 
     for ii in range(1,nback_depth+1): 
-        parameters_block += """    real log_repeat_bias_{ii}_back_n;
+        parameters_block += f"""    real log_repeat_bias_{ii}_back_n;
 """
 
     for ii in range(1,context_depth+1): 
-        parameters_block += """    real<upper=0> log_context_similarity_depth_{ii};
+        parameters_block += f"""    real<upper=0> log_context_similarity_depth_{ii};
 """
 
     parameters_block += """}
@@ -1147,52 +1152,59 @@ transformed parameters {
     matrix[N,N] weights_all_obs;
     vector[N] ps;
     vector[N] aa;
-    """
+"""
     if(nback_depth > 0):
-        model_block += """    vector[N] BaseMeasure;
-    BaseMeasure = ((repeat_bias_1_back-1.0) * Y_is_same_as_one_back + 1.0) / (repeat_bias_1_back + (M-1.0));
-    """
+        depth = 1;
+        model_block += f"""    vector[N] BaseMeasure;
+    BaseMeasure = ((repeat_bias_1_back-1.0) * Y_is_same_as_{depth}_back + 1.0) / (repeat_bias_1_back + (M-1.0));
+"""
     else:
         model_block += """    real BaseMeasure;
     BaseMeasure = 1.0/M;
-    """
+"""
     
     model_block += """
     alpha                         ~ gamma(prior_alpha_shape,                         prior_alpha_scale_inv);
-    """
+"""
 
     for ii in within_session_timeconstants:
         model_block += f"""    timeconstant_within_session_{ii}   ~ gamma(prior_timeconstant_within_session_shape,   prior_timeconstant_within_session_scale_inv);
-    """
+"""
 
     for ii in session_interaction_types:
         model_block += f"""    timeconstant_between_sessions_{ii} ~ gamma(prior_timeconstant_between_sessions_shape, prior_between_sessions_scale_inv);
-    """
+"""
 
     for ii in range(1, nback_depth+1):
-        model_block += f"""repeat_bias_{ii}_back            ~ gamma(prior_repeat_bias_{ii}_back_shape,            prior_repeat_bias_{ii}_back_scale_inv);
-    """
+        model_block += f"""    repeat_bias_{ii}_back            ~ gamma(prior_repeat_bias_{ii}_back_shape,            prior_repeat_bias_{ii}_back_scale_inv);
+"""
 
     for ii in range(1, context_depth+1):
         model_block += f"""    context_similarity_depth_{ii}  ~ beta(prior_context_similarity_depth_{ii}_alpha,   prior_context_similarity_depth_{ii}_beta);
-    """
-    model_block += "    weights_all_obs   = is_prev_observation .* exp("
-    
-    for ii in within_session_timeconstants:
-        model_block += f"""                                                   - deltas/timeconstant_within_session_{ii}
 """
+    model_block +=     f"""    weights_all_obs   = is_prev_observation .* exp("""
+    
+    space_str = ""
+    space_str_b = "                                                   "
+    for ii in within_session_timeconstants:
+        model_block += f"""{space_str}- deltas/timeconstant_within_session_{ii}
+"""
+        space_str = space_str_b
 
     for ii in session_interaction_types:
-        model_block += f"""                                                   - deltas_session_{ii}/timeconstant_within_session_{ii}
+        model_block += f"""{space_str}- deltas_session_{ii}/timeconstant_within_session_{ii}
 """
+        space_str = space_str_b
         
     for ii in range(1, context_depth+1):
-        model_block += f"""                                                   + log_context_similarity_depth_{ii}   * is_different_context_{ii}
-    """
+        model_block += f"""{space_str}+ log_context_similarity_depth_{ii}   * is_different_context_{ii}
+"""
+        space_str = space_str_b
         
     for ii in range(1, nback_depth+1):
-        model_block += f"""                                                   + log_repeat_bias_{ii}_back           * is_same_{ii}_back);
-    """
+        model_block += f"""{space_str}+ log_repeat_bias_{ii}_back           * is_same_{ii}_back);
+ """
+        space_str = space_str_b
         
     model_block += """
     weights_same_obs  = is_same_observation .* weights_all_obs[:,1:N];
