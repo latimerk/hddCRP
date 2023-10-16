@@ -6,6 +6,7 @@ from hddCRP import stanModels
 import arviz as az
 import pandas as pd
 
+
 class UNKNOWN_OBSERVATION:
     def __eq__(self, other):
         if isinstance(other, self.__class__):
@@ -14,7 +15,7 @@ class UNKNOWN_OBSERVATION:
             return False
         
 class cdCRP_priorParams():
-    def __init__(self, max_context_depth : int = 2, max_nback_depth : int = 1;):
+    def __init__(self, max_context_depth : int = 2, max_same_nback_depth : int = 1):
         # defaults:
         self.alpha = {"shape" : 2.0,
                       "scale" : 5.0} # gamma prior
@@ -31,22 +32,23 @@ class cdCRP_priorParams():
         self.repeat_bias_0 = {"shape" : 20} # gamma prior fixed to mean 1
 
         self.context_depth = max_context_depth
-        self.nback_depth   = max_nback_depth
+        self.same_nback_depth   = max_same_nback_depth
 
 
-    def __dict__(self):
-        prior_params = {"prior_alpha_shape" : self.get_alpha_shape,
-                        "prior_alpha_scale" : self.get_alpha_scale,
-                        "prior_timeconstant_within_session_shape" : self.get_timeconstant_within_session_shape,
-                        "prior_timeconstant_within_session_scale" : self.get_timeconstant_within_session_scale,
-                        "prior_timeconstant_between_sessions_shape" : self.get_timeconstant_between_sessions_shape,
-                        "prior_timeconstant_between_sessions_scale" : self.get_timeconstant_between_sessions_scale}
+    def to_dict(self) -> dict:
+        prior_params = {"prior_alpha_shape" : self.get_alpha_shape(),
+                        "prior_alpha_scale" : self.get_alpha_scale(),
+                        "prior_timeconstant_within_session_shape" : self.get_timeconstant_within_session_shape(),
+                        "prior_timeconstant_within_session_scale" : self.get_timeconstant_within_session_scale(),
+                        "prior_timeconstant_between_sessions_shape" : self.get_timeconstant_between_sessions_shape(),
+                        "prior_timeconstant_between_sessions_scale" : self.get_timeconstant_between_sessions_scale()}
         for depth in range(1,self.context_depth+1):
             prior_params[f"prior_context_similarity_depth_{depth}_alpha"] = self.get_context_similarity_alpha(depth)
             prior_params[f"prior_context_similarity_depth_{depth}_beta"] = self.get_context_similarity_beta(depth)
-        for depth in range(1,self.context_depth+1):
+        for depth in range(1,self.same_nback_depth+1):
             prior_params[f"prior_repeat_bias_{depth}_back_shape"] = self.get_repeat_bias_shape(depth)
-        return prior_params;
+        #yield from prior_params.items();
+        return prior_params
 
     @property
     def context_depth(self) -> int:
@@ -58,13 +60,13 @@ class cdCRP_priorParams():
         self._context_depth = cd
 
     @property
-    def nback_depth(self) -> int:
-        return self._nback_depth;
-    @nback_depth.setter
-    def nback_depth(self, nd : int) -> None:
+    def same_nback_depth(self) -> int:
+        return self._same_nback_depth;
+    @same_nback_depth.setter
+    def same_nback_depth(self, nd : int) -> None:
         nd = int(nd)
-        assert nd > 0, "nback_depth must be non-negative integer"
-        self._nback_depth = nd
+        assert nd >= 0, "same_nback_depth must be non-negative integer"
+        self._same_nback_depth = nd
 
     def set_alpha_shape(self, shape : float) -> None:
         assert shape > 0, "shape must be positive"
@@ -111,7 +113,7 @@ class cdCRP_priorParams():
             else:
                 self.context_similarity_0[depth]["alpha"] = float(alpha)
         else:
-            raise ValueError("nback must be non-negative integer or None")
+            raise ValueError("same_nback must be non-negative integer or None")
     def get_context_similarity_alpha(self, depth : int | None) -> float:
         if((depth is None) or depth == 0):
             # default value for any unassigned back
@@ -137,7 +139,7 @@ class cdCRP_priorParams():
             else:
                 self.context_similarity_0[depth]["beta"] = float(beta)
         else:
-            raise ValueError("nback must be non-negative integer or None")
+            raise ValueError("same_nback must be non-negative integer or None")
     def get_context_similarity_beta(self, depth : int | None) -> float:
         if((depth is None) or depth == 0):
             # default value for any unassigned back
@@ -151,34 +153,34 @@ class cdCRP_priorParams():
         else:
             raise ValueError("depth must be non-negative integer or None")
         
-    def set_repeat_bias_shape(self, shape : float, nback : int | None) -> None:
+    def set_repeat_bias_shape(self, shape : float, same_nback : int | None) -> None:
         assert shape > 0, "shape must be positive"
-        if((nback is None) or nback == 0):
+        if((same_nback is None) or same_nback == 0):
             # default value for any unassigned back
             self.repeat_bias_0["shape"] = float(shape);
-        elif(int(nback) > 0):
-            nback = int(nback);
-            if not(nback in self.repeat_bias_0.keys()):
-                self.repeat_bias_0[nback] = {"shape" : float(shape)};
+        elif(int(same_nback) > 0):
+            same_nback = int(same_nback);
+            if not(same_nback in self.repeat_bias_0.keys()):
+                self.repeat_bias_0[same_nback] = {"shape" : float(shape)};
             else:
-                self.repeat_bias_0[nback]["shape"] = float(shape)
+                self.repeat_bias_0[same_nback]["shape"] = float(shape)
         else:
-            raise ValueError("nback must be non-negative integer or None")
-    def get_repeat_bias_shape(self, nback : int | None) -> float:
-        if((nback is None) or nback == 0):
+            raise ValueError("same_nback must be non-negative integer or None")
+    def get_repeat_bias_shape(self, same_nback : int | None) -> float:
+        if((same_nback is None) or same_nback == 0):
             # default value for any unassigned back
             return self.repeat_bias_0["shape"];
-        elif(int(nback) > 0):
-            nback = int(nback);
-            if not(nback in self.repeat_bias_0.keys()):
+        elif(int(same_nback) > 0):
+            same_nback = int(same_nback);
+            if not(same_nback in self.repeat_bias_0.keys()):
                 return self.repeat_bias_0["shape"];
             else:
-                return self.repeat_bias_0[nback]["shape"]
+                return self.repeat_bias_0[same_nback]["shape"]
         else:
-            raise ValueError("nback must be non-negative integer or None")
+            raise ValueError("same_nback must be non-negative integer or None")
 
 class cdCRP():
-    def __init__(self, sequences : list[ArrayLike] | ArrayLike, subject_labels : list[float|int] = None, session_times : list[float|int]=None, session_labels : ArrayLike =None, possible_observations : ArrayLike = None, nback_depth : int = 1, context_depth : int = 2):
+    def __init__(self, sequences : list[ArrayLike] | ArrayLike, subject_labels : list[float|int] = None, session_times : list[float|int]=None, session_labels : ArrayLike =None, possible_observations : ArrayLike = None, same_nback_depth : int = 1, context_depth : int = 2):
         assert len(sequences) > 0, "sequences cannot be empty"
         if(np.isscalar(sequences[0])):
             sequences = [sequences];  # if is single session
@@ -211,13 +213,11 @@ class cdCRP():
         self.session_times = np.array(session_times,dtype=float).flatten()
 
         self.priors = cdCRP_priorParams();
-        self.nback_depth   = nback_depth;
+        self.same_nback_depth   = same_nback_depth;
         self.context_depth = context_depth
 
-        if(self.is_population > 0):
+        if(self.is_population):
             raise NotImplementedError("Population models cannot been created yet.")
-        if(self.sessions_per_subject > 0):
-            raise NotImplementedError("Multisession models cannot been created yet.")
         
         self.distinct_session_within_session_timeconstants = True
 
@@ -226,22 +226,22 @@ class cdCRP():
 
     @property
     def is_population(self) -> bool:
-        return len(self.subjects) > 0;
+        return len(self.subjects) > 1;
 
     @property
     def num_sessions(self) -> int:
         return len(self.sequences);
 
     @property
-    def session_lengths(self) -> np.ndarray[int]:
+    def session_lengths(self) -> np.ndarray:
         return np.array([len(ss) for ss in self.sequences], dtype=int);
 
     @property
-    def observations_per_subject(self) -> np.ndarray[int]:
+    def observations_per_subject(self) -> np.ndarray:
         return np.array([np.sum(self.session_lengths[self.subject_labels == sub]) for sub in self.subjects])
     
     @property
-    def sessions_per_subject(self) -> np.ndarray[int]:
+    def sessions_per_subject(self) -> np.ndarray:
         return np.array([np.sum(self.subject_labels == sub) for sub in self.subjects])
 
     @property
@@ -253,7 +253,7 @@ class cdCRP():
 
     @property
     def subjects(self) -> list[int]:
-        return np.unique(self.subjects);
+        return np.unique(self.subject_labels);
 
     @property
     def num_sessions(self) -> list[int]:
@@ -287,17 +287,17 @@ class cdCRP():
         self._context_depth = cd
         self.priors.context_depth = cd
     @property
-    def nback_depth(self) -> int:
-        return self._nback_depth;
-    @nback_depth.setter
-    def nback_depth(self, nd : int) -> None:
+    def same_nback_depth(self) -> int:
+        return self._same_nback_depth;
+    @same_nback_depth.setter
+    def same_nback_depth(self, nd : int) -> None:
         nd = int(nd)
-        assert nd > 0, "nback_depth must be non-negative integer"
-        self._nback_depth = nd
-        self.priors.nback_depth = nd
+        assert nd >= 0, "same_nback_depth must be non-negative integer"
+        self._same_nback_depth = nd
+        self.priors.same_nback_depth = nd
     
     
-    def setup_compact_sequences(self, flatten : bool = True) -> list[np.ndarray[int]]:
+    def setup_compact_sequences(self, flatten : bool = True) -> list[np.ndarray]:
         v = np.arange(1,self.M+1).astype(int);
         seqs = [(np.array(ss)[:,np.newaxis] == self.possible_observations[np.newaxis,:]) @ v for ss in self.sequences]
         if(flatten):
@@ -307,7 +307,7 @@ class cdCRP():
                 seqs = np.concatenate(seqs);
         return seqs;
 
-    def flatten_sequences(self) -> list[np.ndarray[int]]:
+    def flatten_sequences(self) -> list[np.ndarray]:
         return np.concatenate([np.array(cc, dtype='object').flatten() for cc in self.sequences]);
 
     def setup_contexts(self, depth : int, flatten : bool = True) -> np.ndarray:
@@ -316,19 +316,20 @@ class cdCRP():
 
         contexts = [];
         for seq in self.sequences:
-            contexts += [[UNKNOWN_OBSERVATION()] * depth + [tuple(seq[ss-depth:ss]) for ss in range(len(seq))]];
+            seq_alt = np.concatenate([np.array([UNKNOWN_OBSERVATION()] * depth), seq]);
+            contexts += [np.array([tuple(seq_alt[ss:(ss+depth)]) for ss in range(len(seq))], dtype=list(zip([str(aa) for aa in range(0,depth+1)], ["O"] * depth)))];
         if(flatten):
             if(self.is_population):
                 raise NotImplementedError("population setup doesn't work yet")
             else:
-                contexts = np.concatenate([np.array(cc, dtype='object').flatten() for cc in contexts]);
+                contexts = np.concatenate(contexts);
 
         return contexts;
 
-    def setup_nback(self, depth : int, flatten : bool = True) -> np.ndarray:
+    def setup_same_nback(self, depth : int, flatten : bool = True) -> np.ndarray:
         contexts = [];
         for seq in self.sequences:
-            contexts += [[UNKNOWN_OBSERVATION()] * depth + [seq[ss] for ss in range(len(seq))]];
+            contexts += [[UNKNOWN_OBSERVATION()] * depth + list(seq[:-depth])];
         if(flatten):
             if(self.is_population):
                 raise NotImplementedError("population setup doesn't work yet")
@@ -340,22 +341,22 @@ class cdCRP():
     def setup_local_time(self, flatten : bool = True) -> np.ndarray:
         times = [];
         for ss in self.session_lengths:
-            times += [np.arange(1,ss+1)]];
+            times += [np.arange(1,ss+1)];
         if(flatten):
             if(self.is_population):
                 raise NotImplementedError("population setup doesn't work yet")
             else:
-                times = np.concatenate([np.array(cc, dtype='object').flatten() for cc in times]);
+                times = np.concatenate([np.array(cc, dtype='float').flatten() for cc in times]);
         return times;
 
 
     def get_within_session_timeconstant_labels(self) -> list[str]:
-        if(~self.distinct_session_within_session_timeconstants):
+        if(not self.distinct_session_within_session_timeconstants):
             return ["ALL"]
         else:
             return [str(ss) for ss in self.session_types]
         
-    def setup_within_session_time_constant_ids(self, flatten : bool = True) -> np.ndarray[int]:
+    def setup_within_session_time_constant_ids(self, flatten : bool = True) -> np.ndarray:
         time_constant_id = [np.ones(ss,dtype=int) for ss in self.session_lengths]
         if(self.distinct_session_within_session_timeconstants):
             for ii, session_type in enumerate(self.session_types):
@@ -370,7 +371,7 @@ class cdCRP():
         return time_constant_id
 
 
-    def setup_session_ids(self, flatten : bool = True) -> np.ndarray[int]:
+    def setup_session_ids(self, flatten : bool = True) -> np.ndarray:
         session_id = [np.ones(ss,dtype=int)+ii for ii,ss in enumerate(self.session_lengths)]
         if(flatten):
             if(self.is_population):
@@ -388,11 +389,10 @@ class cdCRP():
         for aa in self.session_types:
             aa_i = np.where(self.session_labels == aa)[0]
             for bb in self.session_types:
-                if(aa != bb):
-                    bb_i = np.where(self.session_labels == bb)[0]
+                bb_i = np.where(self.session_labels == bb)[0]
 
-                    if(np.any(possible_interaction[aa_i,bb_i])):
-                        interaction_types += [(aa,bb)]
+                if(np.any(possible_interaction[aa_i,bb_i])):
+                    interaction_types += [(aa,bb)]
         return interaction_types;
 
     def _to_interaction_name(self, types : tuple[str,str]) -> str:
@@ -418,12 +418,12 @@ class cdCRP():
             if(self.is_population):
                 raise NotImplementedError("population setup doesn't work yet")
             else:
-                for kk in interaction_timings.keys()
+                for kk in interaction_timings.keys():
                     interaction_timings[kk] = np.concatenate(interaction_timings[kk], axis=0);
         return interaction_timings
                 
 
-    def __dict__(self):
+    def to_dict(self) -> dict:
         if(self.is_population):
             raise NotImplementedError("population setup doesn't work yet")
         
@@ -431,34 +431,39 @@ class cdCRP():
                 "Y" : self.setup_compact_sequences(flatten=True),
                 "local_time" : self.setup_local_time(flatten=True),
                 "local_timeconstant_id" : self.setup_within_session_time_constant_ids(flatten=True),
-                "session_id" : self.setup_session_ids(flatten=True)}
+                "session_id" : self.setup_session_ids(flatten=True),
+                "session_lengths" : self.session_lengths,
+                "context_depth" : self.context_depth,
+                "same_nback_depth" : self.same_nback_depth}
+                # "subject_labels" : self.subject_labels,
+                # "session_labels" : self.session_labels,
         
-        for depth in range(1, self.context_depth):
+        for depth in range(1, self.context_depth+1):
             contexts = self.setup_contexts(depth);
-            match = contexts[:,np.ndarray] == contexts[np.ndarray,:]
-            data[f"is_same_context_{depth}"] = np.tril(match,-1)
+            match = contexts[:,np.newaxis] == contexts[np.newaxis,:]
+            data[f"is_same_context_{depth}"] = np.tril(match,-1).astype(int)
 
         base = self.flatten_sequences();
-        for depth in range(1, self.nback_depth):
-            nback = self.setup_nback(depth);
-            match = base[:,np.ndarray] == nback[np.ndarray,:]
-            data[f"is_same_context_{depth}"] = np.tril(match)
+        for depth in range(1, self.same_nback_depth+1):
+            nback = self.setup_same_nback(depth);
+            match = nback[:,np.newaxis] == base[np.newaxis,:]
+            data[f"is_same_{depth}_back"] = np.tril(match).astype(int)
 
         data.update(self.setup_session_interaction_times())
 
-        data.update(dict(self.priors))
-        return data;
+        data.update(self.priors.to_dict())
+        return data
 
     @property
     def data(self):
-        return dict(self);
+        return self.to_dict();
 
     @property
     def model(self):
         pop_model = self.is_population
         multisession_model = np.max(self.sessions_per_subject) > 1
         context_depth = self.context_depth
-        repeat_depth = self.nback_depth
+        repeat_depth = self.same_nback_depth
 
         model_str = ""
         if(pop_model):
@@ -477,7 +482,10 @@ class cdCRP():
             session_interaction_types = self.get_all_interaction_types()
             within_session_timeconstants = self.get_within_session_timeconstant_labels()
 
-            return stanModels.generate_stan_code_individual(session_interaction_types=session_interaction_types, within_session_timeconstants=within_session_timeconstants, context_depth=self.context_depth, nback_depth=self.nback_depth);
+            return stanModels.generate_stan_code_individual(session_interaction_types=session_interaction_types,
+                                                            within_session_timeconstants=within_session_timeconstants,
+                                                            context_depth=self.context_depth,
+                                                            same_nback_depth=self.same_nback_depth);
 
             # if(self.num_sessions == 1):
             #     if(repeat_depth == 0):
@@ -509,9 +517,8 @@ class cdCRP():
 
     def build(self, random_seed : int) -> stan.model.Model:
         self.posterior = stan.build(self.model, data=self.data, random_seed=int(random_seed))
-        self.posterior.random_seed
 
-    def fit(self, num_chains : int = 4, num_samples : int = 1000, random_seed : int = None) -> stan.fit.Fit:
+    def fit_model(self, num_chains : int = 4, num_samples : int = 1000, random_seed : int = None) -> stan.fit.Fit:
         if(self.posterior is None):
             if(not (random_seed is None)):
                 self.build(random_seed=random_seed);
