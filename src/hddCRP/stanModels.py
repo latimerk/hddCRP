@@ -24,6 +24,10 @@ data {
     array[N] int session_id;
     array[N] real local_time;
 
+    int T; // max observation distance
+    int K num_subjects;
+    array[K+1] int subject_start_idx; // first element should be 1, last element should be N
+
     real prior_alpha_shape;
     real prior_alpha_scale;
 """
@@ -50,7 +54,7 @@ data {
 """
 
     for ii in range(1,same_nback_depth+1):
-        data_block += f"""    matrix[N,N] is_same_{ii}_back;
+        data_block += f"""    matrix[N,T] is_same_{ii}_back;
 """
         data_block += f"""    real prior_repeat_bias_{ii}_back_shape;
 """
@@ -62,78 +66,109 @@ transformed data {
     // variables to turn main computation in matrix operations
     vector[N] vs = rep_vector(1, N);
 
-    matrix[N,N] is_same_observation = rep_matrix(0, N, N); // for numerator in CRP likelihood p(y_t | y_1:t-1)
-    matrix[N,N] is_prev_observation = rep_matrix(0, N, N); // for denominator in CRP likelihood p(y_t | y_1:t-1)
-    for (aa in 1:N) {
-        for (bb in 1:N) {
-            if(local_time[bb] < local_time[aa]) {
-                is_prev_observation[aa,bb] = 1;
-            }
+    matrix[N,T] is_same_observation = rep_matrix(0, N, T); // for numerator in CRP likelihood p(y_t | y_1:t-1)
+    matrix[N,T] is_prev_observation = rep_matrix(0, N, T); // for denominator in CRP likelihood p(y_t | y_1:t-1)
+    for (kk in 1:K) {
+        int start_t = subject_start_idx[kk];
+        int end_t   = subject_start_idx[kk+1];
+        int t_c     = end_t - start_t;
+        for (aa in 1:t_c) {
+            int aa_c = aa + start_t - 1;
+            for (bb in 1:t_c) {
+                int bb_c = bb + start_t - 1;
+                if(local_time[bb_c] < local_time[aa_c]) {
+                    is_prev_observation[aa_c,bb] = 1;
+                }
 
-            if((is_prev_observation[aa,bb] > 0) && (Y[aa] == Y[bb])) {
-                is_same_observation[aa,bb] = 1;
+                if((is_prev_observation[aa_c,bb] > 0) && (Y[aa_c] == Y[bb_c])) {
+                    is_same_observation[aa_c,bb] = 1;
+                }
             }
         }
     }
     
 """
     for ii in within_session_timeconstants:
-        transformed_data_block += f"""    matrix[N,N] deltas_{ii} = rep_matrix(0, N, N);
+        transformed_data_block += f"""    matrix[N,T] deltas_{ii} = rep_matrix(0, N, T);
 """
         
     for ii in session_interaction_types:
-        transformed_data_block += f"""    matrix[N,N] deltas_session_{ii} = rep_matrix(0, N, N);
+        transformed_data_block += f"""    matrix[N,T] deltas_session_{ii} = rep_matrix(0, N, T);
 """
         
-    transformed_data_block += """    for (aa in 1:N) {
-        for (bb in 1:N) {
+    transformed_data_block += """
+    for (kk in 1:K) {
+        int start_t = subject_start_idx[kk];
+        int end_t   = subject_start_idx[kk+1];
+        int t_c     = end_t - start_t;
+        for (aa in 1:t_c) {
+            int aa_c = aa + start_t - 1;
+            for (bb in 1:t_c) {
+                int bb_c = bb + start_t - 1;
 """
 
     for id_num_0, ii in enumerate(within_session_timeconstants):
         id_num = id_num_0 + 1;
         transformed_data_block += f"""
-            if((bb < aa) && (local_timeconstant_id[aa] == {id_num}) && (local_timeconstant_id[bb] == {id_num}) && (session_id[aa] == session_id[bb])) {lb}
-                deltas_{ii}[aa,bb] = local_time[aa]-local_time[bb];
-            {rb}
+                if((bb < aa) && (local_timeconstant_id[aa_c] == {id_num}) && (local_timeconstant_id[bb_c] == {id_num}) && (session_id[aa_c] == session_id[bb_c])) {lb}
+                    deltas_{ii}[aa_c,bb] = local_time[aa_c]-local_time[bb_c];
+                {rb}
 """
 
     for ii in session_interaction_types:
         transformed_data_block += f"""
-            if((bb < aa) && (session_time_{ii}[aa,2] > 0) && (session_time_{ii}[bb,1] > 0)) {lb}
-                deltas_session_{ii}[aa,bb] = session_time_{ii}[aa,2]-session_time_{ii}[bb,1];
-            {rb}
+                if((bb_c < aa) && (session_time_{ii}[aa_c,2] > 0) && (session_time_{ii}[bb_c,1] > 0)) {lb}
+                    deltas_session_{ii}[aa_c,bb] = session_time_{ii}[aa_c,2]-session_time_{ii}[bb_c,1];
+                {rb}
 """
-    transformed_data_block += """        }
+    transformed_data_block += """
+            }
+        }
     }
 """
     for ii in range(1,context_depth+1):
-        transformed_data_block += f"""    matrix[N,N] is_different_context_{ii} = rep_matrix(0, N, N);
+        transformed_data_block += f"""
+    matrix[N,T] is_different_context_{ii} = rep_matrix(0, N, T);
 """
 
     if(context_depth > 0):
         transformed_data_block += """
-    for (aa in 1:N) {
-        for (bb in 1:N) {
+    for (kk in 1:K) {
+        int start_t = subject_start_idx[kk];
+        int end_t   = subject_start_idx[kk+1];
+        int t_c     = end_t - start_t;
+        for (aa in 1:t_c) {
+            int aa_c = aa + start_t - 1;
+            for (bb in 1:t_c) {
+                int bb_c = bb + start_t - 1;
 """
 
         for ii in range(1,context_depth+1):
             transformed_data_block +=f"""
-            if(bb < aa && is_same_context_{ii}[aa,bb] <= 0) {lb}
-                is_different_context_{ii}[aa,bb] = 1;
-            {rb}
+                if(bb < aa && is_same_context_{ii}[aa_c,bb] <= 0) {lb}
+                    is_different_context_{ii}[aa_c,bb] = 1;
+                {rb}
 """
 
         transformed_data_block += """
+            }
         }
     }
 """
 
     if(same_nback_depth > 0):
         for ii in range(1,same_nback_depth+1):
-            transformed_data_block += f"""    vector[N] Y_is_same_as_{ii}_back = rep_vector(0, N);
-    for (aa in 1:N) {lb}
-        if(is_same_{ii}_back[aa,aa] > 0) {lb}
-            Y_is_same_as_{ii}_back[aa] = 1;
+            transformed_data_block += f"""
+    vector[N] Y_is_same_as_{ii}_back = rep_vector(0, N);
+    for (kk in 1:K) {lb}
+        int start_t = subject_start_idx[kk];
+        int end_t   = subject_start_idx[kk+1];
+        int t_c     = end_t - start_t;
+        for (aa in 1:t_c) {lb}
+            int aa_c = aa + start_t - 1;
+            if(is_same_{ii}_back[aa_c,aa] > 0) {lb}
+                Y_is_same_as_{ii}_back[aa_c] = 1;
+            {rb}
         {rb}
     {rb}
 """
