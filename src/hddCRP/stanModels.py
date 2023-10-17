@@ -46,7 +46,7 @@ data {
 """
 
     for ii in range(1,context_depth+1):
-        data_block += f"""    matrix[N,N] is_same_context_{ii};
+        data_block += f"""    matrix[N,T] is_same_context_{ii};
 """
         data_block += f"""    real prior_context_similarity_depth_{ii}_alpha;
 """
@@ -221,8 +221,8 @@ transformed data {
 
     
     model_block = """model {
-    matrix[N,N] weights_same_obs;
-    matrix[N,N] weights_all_obs;
+    matrix[N,T] weights_same_obs;
+    matrix[N,T] weights_all_obs;
     vector[N] ps;
 """
     if(same_nback_depth > 0):
@@ -294,16 +294,6 @@ transformed data {
     """
 
     
-    # if(same_nback_depth > 0):
-    #     bm_idx = "[ii]"
-    # else:
-    #     bm_idx = ""
-
-    # model_block += f"""
-    # for (ii in 1:N) {lb}
-    #     ps[ii] =(sum(weights_same_obs[:ii-1]) + alpha*BaseMeasure{bm_idx}) / (sum(weights_all_obs[:ii-1]) + alpha);
-    # {rb}
-    # """
         
     model_block += """
     1 ~ bernoulli(ps); // note: not generative - this is a simplified distribution to make the log likelihood computations work quickly in Stan

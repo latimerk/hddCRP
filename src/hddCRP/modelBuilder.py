@@ -225,8 +225,6 @@ class cdCRP():
         self.same_nback_depth   = same_nback_depth;
         self.context_depth = context_depth
 
-        if(self.is_population):
-            raise NotImplementedError("Population models cannot been created yet.")
         
         self.distinct_session_within_session_timeconstants = True
 
@@ -263,6 +261,9 @@ class cdCRP():
     @property
     def subjects(self) -> list[int]:
         return np.unique(self.subject_labels);
+    @property
+    def num_subjects(self) -> int:
+        return len(self.subjects);
 
     @property
     def num_sessions(self) -> list[int]:
@@ -311,13 +312,16 @@ class cdCRP():
         seqs = [(np.array(ss)[:,np.newaxis] == self.possible_observations[np.newaxis,:]) @ v for ss in self.sequences]
         if(flatten):
             if(self.is_population):
-                raise NotImplementedError("population setup doesn't work yet")
+                seqs = np.concatenate(self._stack_arrays_by_subject(seqs))
             else:
                 seqs = np.concatenate(seqs);
         return seqs;
 
     def flatten_sequences(self) -> list[np.ndarray]:
-        return np.concatenate([np.array(cc, dtype='object').flatten() for cc in self.sequences]);
+        if(self.is_population):
+            return self._stack_arrays_by_subject([np.array(cc, dtype='object').flatten() for cc in self.sequences]);
+        else:
+            return np.concatenate([np.array(cc, dtype='object').flatten() for cc in self.sequences]);
 
     def setup_contexts(self, depth : int, flatten : bool = True) -> np.ndarray:
         depth = int(depth)
@@ -329,7 +333,7 @@ class cdCRP():
             contexts += [np.array([tuple(seq_alt[ss:(ss+depth)]) for ss in range(len(seq))], dtype=list(zip([str(aa) for aa in range(0,depth+1)], ["O"] * depth)))];
         if(flatten):
             if(self.is_population):
-                raise NotImplementedError("population setup doesn't work yet")
+                contexts = self._stack_arrays_by_subject(contexts)
             else:
                 contexts = np.concatenate(contexts);
 
@@ -341,7 +345,7 @@ class cdCRP():
             contexts += [[UNKNOWN_OBSERVATION()] * depth + list(seq[:-depth])];
         if(flatten):
             if(self.is_population):
-                raise NotImplementedError("population setup doesn't work yet")
+                contexts = self._stack_arrays_by_subject([np.array(cc) for cc in contexts])
             else:
                 contexts = np.concatenate([np.array(cc, dtype='object').flatten() for cc in contexts]);
         return contexts;
@@ -353,7 +357,7 @@ class cdCRP():
             times += [np.arange(1,ss+1)];
         if(flatten):
             if(self.is_population):
-                raise NotImplementedError("population setup doesn't work yet")
+                times = np.concatenate(self._stack_arrays_by_subject(times))
             else:
                 times = np.concatenate([np.array(cc, dtype='float').flatten() for cc in times]);
         return times;
@@ -374,7 +378,7 @@ class cdCRP():
                         time_constant_id[jj][:] = ii+1
         if(flatten):
             if(self.is_population):
-                raise NotImplementedError("population setup doesn't work yet")
+                time_constant_id = np.concatenate(self._stack_arrays_by_subject(time_constant_id))
             else:
                 time_constant_id = np.concatenate(time_constant_id);
         return time_constant_id
@@ -384,7 +388,7 @@ class cdCRP():
         session_id = [np.ones(ss,dtype=int)+ii for ii,ss in enumerate(self.session_lengths)]
         if(flatten):
             if(self.is_population):
-                raise NotImplementedError("population setup doesn't work yet")
+                session_id = np.concatenate(self._stack_arrays_by_subject(session_id))
             else:
                 session_id = np.concatenate(session_id);
         return session_id
@@ -425,12 +429,44 @@ class cdCRP():
 
         if(concatenate):
             if(self.is_population):
-                raise NotImplementedError("population setup doesn't work yet")
+                for kk in interaction_timings.keys():
+                    interaction_timings[kk] = np.concatenate(self._stack_arrays_by_subject(interaction_timings[kk] ))
             else:
                 for kk in interaction_timings.keys():
                     interaction_timings[kk] = np.concatenate(interaction_timings[kk], axis=0);
         return interaction_timings
-                
+             
+    def _stack_arrays_by_subject(self, arrays : list[ArrayLike]):
+        assert len(arrays) == self.num_sessions, "list of arrays must be the same as the number of sessions"
+        
+        C = [];
+        for sub in self.subjects:
+            C += [np.concatenate([np.array(arrays[ss]) for ss in np.where(self.subject_labels == sub)[0]])]
+        return C;
+
+    def _stack_arrays(self, arrays : list[ArrayLike],  T_0 : int = None):
+        md = np.max([xx.ndim for xx in arrays])
+        T = np.max([np.prod(xx.shape[1:]) for xx in arrays])
+        if(not T_0 is None):
+            assert T <= T_0, "found T is greater than expected T"
+        N = np.sum([xx.shape[0] for xx in arrays])
+        if(md > 1):
+            C = np.zeros((N, T), dtype=arrays[0].dtype)
+        else:
+            C = np.zeros((N), dtype=arrays[0].dtype)
+
+        ctr = 0;
+        for ss in arrays:
+            if(md > 1):
+                C[ctr:ctr+ss.shape[0],:ss.shape[1]] = ss
+            else:
+                C[ctr:ctr+ss.shape[0]] = ss
+            ctr += ss.shape[0];
+        return C
+
+
+    def setup_concatenated_start_times_per_subject(self) -> np.ndarray:
+        return np.concatenate([[0],self.observations_per_subject]).astype(int).cumsum()
 
     def to_dict(self) -> dict:
         if(self.is_population):
@@ -438,30 +474,40 @@ class cdCRP():
         
         data = {"N" : self.total_observations, "M" : self.M, "T" : np.max(self.observations_per_subject),
                 "Y" : self.setup_compact_sequences(flatten=True),
+                "K" : self.num_subjects,
                 "local_time" : self.setup_local_time(flatten=True),
                 "local_timeconstant_id" : self.setup_within_session_time_constant_ids(flatten=True),
                 "session_id" : self.setup_session_ids(flatten=True),
                 "session_lengths" : self.session_lengths,
                 "context_depth" : self.context_depth,
-                "same_nback_depth" : self.same_nback_depth}
+                "same_nback_depth" : self.same_nback_depth,
+                "subject_start_idx" : self.setup_concatenated_start_times_per_subject(),}
                 # "subject_labels" : self.subject_labels,
                 # "session_labels" : self.session_labels,
         
         for depth in range(1, self.context_depth+1):
             contexts = self.setup_contexts(depth);
-            match = contexts[:,np.newaxis] == contexts[np.newaxis,:]
-            data[f"is_same_context_{depth}"] = np.tril(match,-1).astype(int)
+            if(not self.is_population):
+                match = contexts[:,np.newaxis] == contexts[np.newaxis,:]
+                data[f"is_same_context_{depth}"] = np.tril(match,-1).astype(int)
+            else:
+                match = self._stack_arrays([contexts_c[:,np.newaxis] == contexts_c[np.newaxis,:] for contexts_c in contexts])
 
         base = self.flatten_sequences();
         for depth in range(1, self.same_nback_depth+1):
             nback = self.setup_same_nback(depth);
-            match = nback[:,np.newaxis] == base[np.newaxis,:]
-            data[f"is_same_{depth}_back"] = np.tril(match).astype(int)
+            if(not self.is_population):
+                match = nback[:,np.newaxis] == base[np.newaxis,:]
+                data[f"is_same_{depth}_back"] = np.tril(match).astype(int)
+            else:
+                match = self._stack_arrays([nback_c[:,np.newaxis] == base_c[np.newaxis,:] for nback_c, base_c in zip(nback, base)])
+
 
         data.update(self.setup_session_interaction_times())
 
         data.update(self.priors.to_dict())
         return data
+    
 
     @property
     def data(self):
@@ -487,42 +533,14 @@ class cdCRP():
         model_str += f"repeat_{repeat_depth}" 
 
 
-        if(not pop_model):
-            session_interaction_types = self.get_all_interaction_types()
-            within_session_timeconstants = self.get_within_session_timeconstant_labels()
+        session_interaction_types = self.get_all_interaction_types()
+        within_session_timeconstants = self.get_within_session_timeconstant_labels()
 
-            return stanModels.generate_stan_code_individual(session_interaction_types=session_interaction_types,
-                                                            within_session_timeconstants=within_session_timeconstants,
-                                                            context_depth=self.context_depth,
-                                                            same_nback_depth=self.same_nback_depth);
+        return stanModels.generate_stan_code_individual(session_interaction_types=session_interaction_types,
+                                                        within_session_timeconstants=within_session_timeconstants,
+                                                        context_depth=self.context_depth,
+                                                        same_nback_depth=self.same_nback_depth);
 
-            # if(self.num_sessions == 1):
-            #     if(repeat_depth == 0):
-            #         if(context_depth == 0):
-            #             return stanModels.model_individual_session_context_0_repeat_0
-            #         elif(context_depth == 1):
-            #             return stanModels.model_individual_session_context_1_repeat_0
-            #         elif(context_depth == 2):
-            #             return stanModels.model_individual_session_context_2_repeat_0
-            #         else:
-            #             raise NotImplementedError("No models with context depth > 2: " + model_str )
-            #     elif(repeat_depth == 1):
-            #         if(context_depth == 0):
-            #             return stanModels.model_individual_session_context_0_repeat_1
-            #         elif(context_depth == 1):
-            #             return stanModels.model_individual_session_context_1_repeat_1
-            #         elif(context_depth == 2):
-            #             return stanModels.model_individual_session_context_2_repeat_1
-            #         else:
-            #             raise NotImplementedError("No models with context depth > 2: " + model_str )
-            #     else:
-            #         raise NotImplementedError("No models with repeat depth > 1: " + model_str )
-            # else:
-            #     if(self.num_session_types == 1):
-            #         raise NotImplementedError("No multisession models with different session labels yet: " + model_str )
-        else:
-            raise NotImplementedError("No population models yet: " + model_str )
-        
 
     def build(self, random_seed : int) -> stan.model.Model:
         self.posterior = stan.build(self.model, data=self.data, random_seed=int(random_seed))
