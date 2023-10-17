@@ -18,7 +18,7 @@ class cdCRP_priorParams():
     def __init__(self, max_context_depth : int = 2, max_same_nback_depth : int = 1):
         # defaults:
         self.alpha = {"shape" : 2.0,
-                      "scale" : 5.0} # gamma prior
+                      "scale" : 2.0} # gamma prior
 
         self.timeconstant_within_session = {"shape" : 2.0,
                                             "scale" : 25.0} # gamma prior
