@@ -6,7 +6,7 @@ import warnings
 def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
                       num_responses : int, alpha : float, different_context_weights : ArrayLike,
                       within_session_timescales : dict, between_session_timescales : dict = None, repeat_bias_1_back : float = 1, base_measure : ArrayLike = None,
-                      rng : np.random.Generator = None):
+                      rng : np.random.Generator = None, repeat_bias_in_connection_weights : bool = False):
     if(np.isscalar(session_lengths)):
         session_lengths = [session_lengths];
     if(np.isscalar(session_labels)):
@@ -78,6 +78,7 @@ def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
         if(one_back >= 0):
             base_measure_c[one_back] *= repeat_bias_1_back
             base_measure_c /= np.sum(base_measure_c)
+        # print(base_measure_c)
 
         # set up previous observations
         ws = np.zeros(tt)
@@ -95,7 +96,8 @@ def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
             different_context = ~np.all(context_match[:,:depth+1], axis=1)
             ws[different_context] += log_different_context_weights[dd]
 
-        ws[Y[:tt] == one_back] += log_repeat_bias_1_back
+        if(repeat_bias_in_connection_weights):
+            ws[Y[:tt] == one_back] += log_repeat_bias_1_back
 
         # sum up observations
         ws_e = np.exp(ws)

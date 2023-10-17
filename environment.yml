@@ -140,7 +140,6 @@ dependencies:
   - openjpeg=2.4.0=h3ad879b_0
   - openssl=3.0.11=h7f8727e_2
   - packaging=23.1=py310h06a4308_0
-  - pandas=2.0.3=py310h1128e8f_0
   - pandocfilters=1.5.0=pyhd3eb1b0_0
   - parso=0.8.3=pyhd3eb1b0_0
   - pcre=8.45=h295c915_0
@@ -181,7 +180,6 @@ dependencies:
   - rfc3339-validator=0.1.4=py310h06a4308_0
   - rfc3986-validator=0.1.1=py310h06a4308_0
   - scipy=1.11.3=py310h5f9d8c6_0
-  - seaborn=0.12.2=py310h06a4308_0
   - send2trash=1.8.0=pyhd3eb1b0_1
   - setuptools=68.0.0=py310h06a4308_0
   - sip=6.6.2=py310h6a678d5_0
@@ -224,15 +222,19 @@ dependencies:
     - clikit==0.6.2
     - crashtest==0.3.1
     - frozenlist==1.4.0
+    - hddcrp==0.1
     - httpstan==4.10.1
     - marshmallow==3.20.1
     - multidict==6.0.4
     - nest-asyncio==1.5.8
+    - pandas==1.5.3
     - pastel==0.2.1
     - pylev==1.4.0
     - pyqt5-sip==12.11.0
     - pysimdjson==5.0.2
     - pystan==3.7.0
+    - seaborn==0.11.2
+    - statannotations==0.6.0
     - webargs==8.3.0
     - yarl==1.9.2
 prefix: /home/latimerk/anaconda3/envs/JaiYuLab

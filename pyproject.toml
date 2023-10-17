@@ -20,7 +20,8 @@ dependencies = [
     "arviz",
     "cython",
     "pystan",
-    "nest_asyncio"
+    "nest_asyncio",
+    "statannotations"
 ]
 
 [build-system]

@@ -1,6 +1,10 @@
 
 
-def generate_stan_code_individual(within_session_timeconstants : list, session_interaction_types : list, context_depth : int, same_nback_depth : int) -> str:
+def generate_stan_code_individual(within_session_timeconstants : list,
+                                  session_interaction_types : list,
+                                  context_depth : int,
+                                  same_nback_depth : int,
+                                  repeat_bias_in_connection_weights : bool = False) -> str:
     context_depth = max(0, int(context_depth))
     same_nback_depth = max(0, int(same_nback_depth))
 
@@ -236,11 +240,14 @@ transformed data {
         model_block += f"""{space_str}+ (log(context_similarity_depth_{ii})  * is_different_context_{ii})
 """
         space_str = space_str_b
-        
-    for ii in range(1, same_nback_depth+1):
-        model_block += f"""{space_str}+ (log(context_repeat_bias_{ii}_back)   * is_same_{ii}_back)
- """
-        space_str = space_str_b
+
+    if(repeat_bias_in_connection_weights):    
+        for ii in range(1, same_nback_depth+1):
+            model_block += f"""{space_str}+ (log(context_repeat_bias_{ii}_back)   * is_same_{ii}_back)
+    """
+            space_str = space_str_b
+
+            
     model_block += f"""{space_str});
 """
         
