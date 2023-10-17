@@ -25,8 +25,8 @@ data {
     array[N] real local_time;
 
     int T; // max observation distance
-    int K num_subjects;
-    array[K+1] int subject_start_idx; // first element should be 1, last element should be N
+    int K; // number of subjects that are stacked on top of each other
+    array[K+1] int subject_start_idx; // first element should be 1, last element should be N+1
 
     real prior_alpha_shape;
     real prior_alpha_scale;
@@ -64,7 +64,7 @@ data {
     transformed_data_block = """
 transformed data {
     // variables to turn main computation in matrix operations
-    vector[N] vs = rep_vector(1, N);
+    vector[T] vs = rep_vector(1, T);
 
     matrix[N,T] is_same_observation = rep_matrix(0, N, T); // for numerator in CRP likelihood p(y_t | y_1:t-1)
     matrix[N,T] is_prev_observation = rep_matrix(0, N, T); // for denominator in CRP likelihood p(y_t | y_1:t-1)
@@ -294,7 +294,6 @@ transformed data {
     """
 
     
-        
     model_block += """
     1 ~ bernoulli(ps); // note: not generative - this is a simplified distribution to make the log likelihood computations work quickly in Stan
 }

@@ -469,8 +469,6 @@ class cdCRP():
         return np.concatenate([[0],self.observations_per_subject]).astype(int).cumsum()
 
     def to_dict(self) -> dict:
-        if(self.is_population):
-            raise NotImplementedError("population setup doesn't work yet")
         
         data = {"N" : self.total_observations, "M" : self.M, "T" : np.max(self.observations_per_subject),
                 "Y" : self.setup_compact_sequences(flatten=True),
@@ -481,7 +479,7 @@ class cdCRP():
                 "session_lengths" : self.session_lengths,
                 "context_depth" : self.context_depth,
                 "same_nback_depth" : self.same_nback_depth,
-                "subject_start_idx" : self.setup_concatenated_start_times_per_subject(),}
+                "subject_start_idx" : self.setup_concatenated_start_times_per_subject()+1,}
                 # "subject_labels" : self.subject_labels,
                 # "session_labels" : self.session_labels,
         
@@ -491,7 +489,7 @@ class cdCRP():
                 match = contexts[:,np.newaxis] == contexts[np.newaxis,:]
                 data[f"is_same_context_{depth}"] = np.tril(match,-1).astype(int)
             else:
-                match = self._stack_arrays([contexts_c[:,np.newaxis] == contexts_c[np.newaxis,:] for contexts_c in contexts])
+                data[f"is_same_context_{depth}"] = self._stack_arrays([np.tril(contexts_c[:,np.newaxis] == contexts_c[np.newaxis,:],-1).astype(int) for contexts_c in contexts])
 
         base = self.flatten_sequences();
         for depth in range(1, self.same_nback_depth+1):
@@ -500,7 +498,7 @@ class cdCRP():
                 match = nback[:,np.newaxis] == base[np.newaxis,:]
                 data[f"is_same_{depth}_back"] = np.tril(match).astype(int)
             else:
-                match = self._stack_arrays([nback_c[:,np.newaxis] == base_c[np.newaxis,:] for nback_c, base_c in zip(nback, base)])
+                data[f"is_same_{depth}_back"] = self._stack_arrays([np.tril(nback_c[:,np.newaxis] == base_c[np.newaxis,:]).astype(int) for nback_c, base_c in zip(nback, base)])
 
 
         data.update(self.setup_session_interaction_times())
