@@ -22,7 +22,7 @@ def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
     assert np.all(different_context_weights >= 0), "context_weights must be positive"
     if(np.any(different_context_weights > 1)):
         warnings.warn("Context weights in model are assumed to be <= 1. Values > 1 found.")
-    log_different_context_weights = np.log(different_context_weights)
+    log_different_context_weights = np.log(1.0-different_context_weights)
     if(repeat_bias_1_back is None):
         repeat_bias_1_back = 1
     assert np.isscalar(repeat_bias_1_back) and repeat_bias_1_back > 0, "repeat_bias_1_back must be a positive scalar"

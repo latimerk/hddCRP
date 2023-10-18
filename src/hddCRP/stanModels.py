@@ -110,14 +110,14 @@ transformed data {
     for id_num_0, ii in enumerate(within_session_timeconstants):
         id_num = id_num_0 + 1;
         transformed_data_block += f"""
-                if((bb < aa) && (local_timeconstant_id[aa_c] == {id_num}) && (local_timeconstant_id[bb_c] == {id_num}) && (session_id[aa_c] == session_id[bb_c])) {lb}
+                if((is_prev_observation[aa_c,bb] > 0) && (local_timeconstant_id[aa_c] == {id_num}) && (local_timeconstant_id[bb_c] == {id_num}) && (session_id[aa_c] == session_id[bb_c])) {lb}
                     deltas_{ii}[aa_c,bb] = local_time[aa_c]-local_time[bb_c];
                 {rb}
 """
 
     for ii in session_interaction_types:
         transformed_data_block += f"""
-                if((bb_c < aa) && (session_time_{ii}[aa_c,2] > 0) && (session_time_{ii}[bb_c,1] > 0)) {lb}
+                if((is_prev_observation[aa_c,bb] > 0)&& (session_time_{ii}[aa_c,2] > 0) && (session_time_{ii}[bb_c,1] > 0)) {lb}
                     deltas_session_{ii}[aa_c,bb] = session_time_{ii}[aa_c,2]-session_time_{ii}[bb_c,1];
                 {rb}
 """
@@ -270,7 +270,7 @@ transformed data {
         space_str = space_str_b
         
     for ii in range(1, context_depth+1):
-        model_block += f"""{space_str}+ (log(context_similarity_depth_{ii})  * is_different_context_{ii})
+        model_block += f"""{space_str}+ (log(1.0-context_similarity_depth_{ii})  * is_different_context_{ii})
 """
         space_str = space_str_b
 

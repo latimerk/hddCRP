@@ -26,7 +26,7 @@ class cdCRP_priorParams():
                       "scale" : 2.0} # gamma prior
 
         self.timeconstant_within_session = {"shape" : 2.0,
-                                            "scale" : 25.0} # gamma prior
+                                            "scale" : 20.0} # gamma prior
         
         self.timeconstant_between_sessions = {"shape" : 2.0,
                                               "scale" : 2.0} # gamma prior
@@ -430,10 +430,10 @@ class cdCRP():
         if(concatenate):
             if(self.is_population):
                 for kk in interaction_timings.keys():
-                    interaction_timings[kk] = np.concatenate(self._stack_arrays_by_subject(interaction_timings[kk] ))
+                    interaction_timings[kk] = np.concatenate(self._stack_arrays_by_subject(interaction_timings[kk] )).astype(float)
             else:
                 for kk in interaction_timings.keys():
-                    interaction_timings[kk] = np.concatenate(interaction_timings[kk], axis=0);
+                    interaction_timings[kk] = np.concatenate(interaction_timings[kk], axis=0).astype(float)
         return interaction_timings
              
     def _stack_arrays_by_subject(self, arrays : list[ArrayLike]):
@@ -473,7 +473,7 @@ class cdCRP():
         data = {"N" : self.total_observations, "M" : self.M, "T" : np.max(self.observations_per_subject),
                 "Y" : self.setup_compact_sequences(flatten=True),
                 "K" : self.num_subjects,
-                "local_time" : self.setup_local_time(flatten=True),
+                "local_time" : self.setup_local_time(flatten=True).astype(float),
                 "local_timeconstant_id" : self.setup_within_session_time_constant_ids(flatten=True),
                 "session_id" : self.setup_session_ids(flatten=True),
                 "session_lengths" : self.session_lengths,
