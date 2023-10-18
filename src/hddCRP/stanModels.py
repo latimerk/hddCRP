@@ -272,7 +272,7 @@ transformed data {
 """
         
     for ii in range(1, context_depth+1):
-        model_block += f"""{space_str}.* (1.0-context_similarity_depth_{ii})  * is_different_context_{ii})
+        model_block += f"""{space_str}.* ((1.0-context_similarity_depth_{ii})  * is_different_context_{ii})
 """
         space_str = space_str_b
 
