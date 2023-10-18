@@ -175,16 +175,15 @@ transformed data {
 
     transformed_data_block += """
     // prior parameter transformations for computations
-    real prior_alpha_scale_log = log(prior_alpha_scale);
     real prior_alpha_scale_inv = inv(prior_alpha_scale);
 """
 
     if(len(within_session_timeconstants) > 0):
-        transformed_data_block += """    real prior_timeconstant_within_session_scale_log   = log(prior_timeconstant_within_session_scale);
+        transformed_data_block += """
     real prior_timeconstant_within_session_scale_inv   = inv(prior_timeconstant_within_session_scale);
 """
     if(len(session_interaction_types) > 0):
-        transformed_data_block += """    real prior_timeconstant_between_sessions_scale_log = log(prior_timeconstant_between_sessions_scale);
+        transformed_data_block += """
     real prior_timeconstant_between_sessions_scale_inv = inv(prior_timeconstant_between_sessions_scale);
 """
 
@@ -192,7 +191,6 @@ transformed data {
         transformed_data_block += f"""
     real prior_repeat_bias_{ii}_back_scale     = inv(prior_repeat_bias_1_back_shape);
     real prior_repeat_bias_{ii}_back_scale_inv = prior_repeat_bias_1_back_shape;
-    real prior_repeat_bias_{ii}_back_scale_log = log(prior_repeat_bias_1_back_scale);
 """
     transformed_data_block += """}
 """
