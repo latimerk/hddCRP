@@ -117,7 +117,7 @@ transformed data {
 
     for ii in session_interaction_types:
         transformed_data_block += f"""
-                if((is_prev_observation[aa_c,bb] > 0)&& (session_time_{ii}[aa_c,2] > 0) && (session_time_{ii}[bb_c,1] > 0)) {lb}
+                if((is_prev_observation[aa_c,bb] > 0) && (session_time_{ii}[aa_c,2] > 0) && (session_time_{ii}[bb_c,1] > 0)) {lb}
                     deltas_session_{ii}[aa_c,bb] = session_time_{ii}[aa_c,2]-session_time_{ii}[bb_c,1];
                 {rb}
 """
@@ -268,20 +268,22 @@ transformed data {
         model_block += f"""{space_str} (- deltas_session_{ii}/timeconstant_within_session_{ii})
 """
         space_str = space_str_b
+    model_block += f"""{space_str})
+"""
         
     for ii in range(1, context_depth+1):
-        model_block += f"""{space_str}+ (log(1.0-context_similarity_depth_{ii})  * is_different_context_{ii})
+        model_block += f"""{space_str}.* (1.0-context_similarity_depth_{ii})  * is_different_context_{ii})
 """
         space_str = space_str_b
 
     if(repeat_bias_in_connection_weights):    
         for ii in range(1, same_nback_depth+1):
-            model_block += f"""{space_str}+ (log(context_repeat_bias_{ii}_back)   * is_same_{ii}_back)
+            model_block += f"""{space_str}.* (context_repeat_bias_{ii}_back   * is_same_{ii}_back)
     """
             space_str = space_str_b
 
             
-    model_block += f"""{space_str});
+    model_block += f"""{space_str};
 """
         
     model_block += """
