@@ -172,9 +172,9 @@ for simulation_id in simulation_range:
                 "timeconstant_within_session_A" : within_session_timescales["A"]}
                 if(nback_depth >= 1):
                     true_param["repeat_bias_1_back"] = repeat_bias_1_back
-                if(nback_depth >= 1):
+                if(context_depth >= 1):
                     true_param["context_similarity_depth_1"] = different_context_weights[0],
-                if(nback_depth >= 21):
+                if(context_depth >= 2):
                     true_param["context_similarity_depth_2"] = different_context_weights[1]
 
                 summary_df["true"] = pd.Series(true_param)
