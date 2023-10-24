@@ -145,7 +145,7 @@ transformed data {
 
         for ii in range(1,context_depth+1):
             transformed_data_block +=f"""
-                if(bb < aa && is_same_context_{ii}[aa_c,bb] <= 0) {lb}
+                if((is_prev_observation[aa_c,bb] > 0) && (is_same_context_{ii}[aa_c,bb] <= 0)) {lb}
                     is_different_context_{ii}[aa_c,bb] = 1;
                 {rb}
 """
@@ -260,12 +260,12 @@ transformed data {
     space_str = ""
     space_str_b = "                                                   "
     for ii in within_session_timeconstants:
-        model_block += f"""{space_str} (- deltas_{ii}/timeconstant_within_session_{ii})
+        model_block += f"""{space_str} -(deltas_{ii}/timeconstant_within_session_{ii})
 """
         space_str = space_str_b
 
     for ii in session_interaction_types:
-        model_block += f"""{space_str} (- deltas_session_{ii}/timeconstant_within_session_{ii})
+        model_block += f"""{space_str} -(deltas_session_{ii}/timeconstant_within_session_{ii})
 """
         space_str = space_str_b
         

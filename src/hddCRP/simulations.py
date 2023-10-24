@@ -83,13 +83,16 @@ def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
         # set up previous observations
         ws = np.zeros(tt)
         in_session = tts_session[:tt] == session
-        tau_within = within_session_timescales[labels[tt]];
+        tau_within = (within_session_timescales[labels[tt]]);
         dts = (trial_time - tts_trial[:tt][in_session]);
         ws[in_session] += -dts/tau_within
+        #print(ws[in_session])
 
         if(not (between_session_timescales is None)):
             out_session = ~in_session
-            ws[out_session] += -(trial_time - tts_session[:tt][out_session])/np.array([between_session_timescales[xx, labels[tt]] for xx in labels[:tt][out_session]])
+            dts = (trial_time - tts_session[:tt][out_session])
+            taus = np.array([between_session_timescales[xx, labels[tt]] for xx in labels[:tt][out_session]],dtype=float)
+            ws[out_session] += -dts/taus
 
         context_match = contexts[:tt, :] == np.reshape(contexts[tt, :], (1,depth))
         for dd in range(depth):
@@ -106,9 +109,6 @@ def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
             ts[ii] += np.sum(ws_e[Y[:tt] == ii]) + alpha*base_measure_c[ii]
 
         
-        # for ii in range(num_responses):
-        #     ts[ii] = alpha/num_responses + sum(Y[:tt] == ii);
-
         ps = ts / np.sum(ts)
 
         Y[tt] = rng.choice(num_responses, p=ps);
@@ -116,14 +116,4 @@ def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
     session_starts = np.concatenate([[0], np.cumsum(session_lengths)])
 
     seqs = [Y[ss:ss+ll] for ss,ll in zip(session_starts, session_lengths)]
-    # print("tau_within")
-    # print(tau_within)
-    # print("ws")
-    # print(ws)
-    # print("ws_e")
-    # print(ws_e)
-    # print("ts")
-    # print(ts)
-    # print("ps")
-    # print(ps)
     return seqs
