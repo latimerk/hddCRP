@@ -25,17 +25,17 @@ min_blocks = int(args[2]);
 max_blocks = int(args[3]);
 
 block_range = range(min_blocks, max_blocks+1)
-run_range = range(0, 20)
+run_range = range(0, 50)
 
 results_directory = "Results/Simulations/"
-OVERWRITE = False;
+OVERWRITE = True;
 
 
 if(not os.path.exists(results_directory)):
     os.makedirs(results_directory)
 
 nback_depth   = 1;
-context_depth = 2;
+context_depth = 1;
 
 
 
@@ -48,73 +48,95 @@ for simulation_id in simulation_range:
         alpha = 2
         different_context_weights = [0.7, 0.7];
         within_session_timescales  = {"A" : 20}
-        between_session_timescales = {("A","A") : 2}
+        between_session_timescales = None; #{("A","A") : 2}
         repeat_bias_1_back = 0.75
 
         session_labels  = lambda n_blocks : ["A"] ;
-        session_lengths = lambda n_blocks : [50 * n_blocks];
+        session_lengths = lambda n_blocks : [10 * n_blocks];
         num_subjects    = lambda n_blocks : 1;
         num_responses = 3
     elif(simulation_id == 1):
-        alpha = 8
+        alpha = 5
         different_context_weights = [0.3, 0.3];
         within_session_timescales  = {"A" : 40}
-        between_session_timescales = {("A","A") : 2}
-        repeat_bias_1_back = 0.25
+        between_session_timescales =  None; #{("A","A") : 2}
+        repeat_bias_1_back = 1.0
 
         session_labels  = lambda n_blocks : ["A"] ;
-        session_lengths = lambda n_blocks : [50 * n_blocks];
+        session_lengths = lambda n_blocks : [10 * n_blocks];
         num_subjects = lambda n_blocks : 1;
         num_responses = 3
     elif(simulation_id == 2):
-        alpha = 2
-        different_context_weights = [0.7, 0.7];
+        alpha = 5
+        different_context_weights = [0.2, 0.2];
         within_session_timescales  = {"A" : 20}
-        between_session_timescales = {("A","A") : 2}
-        repeat_bias_1_back = 0.75
+        between_session_timescales = None; #{("A","A") : 2}
+        repeat_bias_1_back = 0.8
 
         session_labels  = lambda n_blocks : ["A"] ;
-        session_lengths = lambda n_blocks : [50 ];
-        num_subjects = lambda n_blocks : n_blocks;
+        session_lengths = lambda n_blocks : [10 * n_blocks];
+        num_subjects    = lambda n_blocks : 1;
         num_responses = 3
     elif(simulation_id == 3):
-        alpha = 8
-        different_context_weights = [0.3, 0.3];
+        alpha = 5
+        different_context_weights = [0.8, 0.8];
         within_session_timescales  = {"A" : 40}
-        between_session_timescales = {("A","A") : 2}
-        repeat_bias_1_back = 0.25
+        between_session_timescales =  None; #{("A","A") : 2}
+        repeat_bias_1_back = 1.0
 
         session_labels  = lambda n_blocks : ["A"] ;
-        session_lengths = lambda n_blocks : [50 ];
-        num_subjects = lambda n_blocks :  n_blocks;
+        session_lengths = lambda n_blocks : [10 * n_blocks];
+        num_subjects = lambda n_blocks : 1;
         num_responses = 3
     elif(simulation_id == 4):
         alpha = 2
         different_context_weights = [0.7, 0.7];
-        within_session_timescales  = {"A" : 40}
-        between_session_timescales = {("A","A") : 2}
+        within_session_timescales  = {"A" : 20}
+        between_session_timescales = None; #{("A","A") : 2}
         repeat_bias_1_back = 0.75
 
         session_labels  = lambda n_blocks : ["A"] ;
-        session_lengths = lambda n_blocks : [50 ];
-        num_subjects = lambda n_blocks : n_blocks;
+        session_lengths = lambda n_blocks : [10 * n_blocks ];
+        num_subjects = lambda n_blocks : 10;
         num_responses = 3
     elif(simulation_id == 5):
-        alpha = 8
+        alpha = 5
         different_context_weights = [0.3, 0.3];
-        within_session_timescales  = {"A" : 20}
-        between_session_timescales = {("A","A") : 2}
-        repeat_bias_1_back = 0.25
+        within_session_timescales  = {"A" : 40}
+        between_session_timescales = None; #{("A","A") : 2}
+        repeat_bias_1_back = 1.0
 
         session_labels  = lambda n_blocks : ["A"] ;
-        session_lengths = lambda n_blocks : [50 ];
-        num_subjects = lambda n_blocks :  n_blocks;
+        session_lengths = lambda n_blocks : [10 * n_blocks ];
+        num_subjects = lambda n_blocks :  10;
+        num_responses = 3
+    elif(simulation_id == 6):
+        alpha = 5
+        different_context_weights = [0.2, 0.2];
+        within_session_timescales  = {"A" : 20}
+        between_session_timescales = None; #{("A","A") : 2}
+        repeat_bias_1_back = 0.8
+
+        session_labels  = lambda n_blocks : ["A"] ;
+        session_lengths = lambda n_blocks : [10 * n_blocks ];
+        num_subjects = lambda n_blocks : 10;
+        num_responses = 3
+    elif(simulation_id == 7):
+        alpha = 5
+        different_context_weights = [0.8, 0.8];
+        within_session_timescales  = {"A" : 40}
+        between_session_timescales = None; #{("A","A") : 2}
+        repeat_bias_1_back = 1.0
+
+        session_labels  = lambda n_blocks : ["A"] ;
+        session_lengths = lambda n_blocks : [10 * n_blocks ];
+        num_subjects = lambda n_blocks :  10;
         num_responses = 3
     else:
         raise NotImplementedError("No sim found")
     
     if(nback_depth < 1):
-        repeat_bias_1_back = 1;
+        repeat_bias_1_back = None;
     different_context_weights = different_context_weights[:context_depth]
 
     for block_idx in block_range:
@@ -124,15 +146,16 @@ for simulation_id in simulation_range:
         if(nback_depth != 1 or context_depth != 2):
             fit_file += f"_cd{context_depth}_nb{nback_depth}"
             fit_summary_file  += f"_cd{context_depth}_nb{nback_depth}"
+        fit_file += f".pkl"
+        fit_summary_file  += f".pkl"
 
 
         if(((not os.path.isfile(fit_file)) or (not os.path.isfile(fit_summary_file))) or OVERWRITE):
             simulation_fits = pd.DataFrame()
             simulation_fit_metrics = pd.DataFrame()
             for run_idx in run_range:
-                print(f"BLOCK {block_idx} - RUN {run_idx}")
-                sim_seed  = (simulation_id+1) * 10000 + run_idx*100
-                stan_seed = (simulation_id+1) * 10000 + run_idx*100 + block_idx
+                sim_seed  = (simulation_id+1) * 10000 + nback_depth * 1001 + context_depth * 1000 + run_idx*100 
+                stan_seed = (simulation_id+1) * 10000 + nback_depth * 1001 + context_depth * 1000 + run_idx*100 + block_idx
                 # sim_rng = np.random.Generator(np.random.MT19937(sim_seed))
                 
                 seqs = [];
@@ -148,6 +171,8 @@ for simulation_id in simulation_range:
                     subject_labels += [jj] * len(seqs_c)
                     session_labels_all += session_labels(block_idx)
                     seqs += seqs_c;
+                print(f"BLOCK {block_idx} - RUN {run_idx}")
+                print(seqs)
 
                 model = cdCRP(seqs, subject_labels=subject_labels, session_labels=session_labels_all);
                 model.same_nback_depth = nback_depth;
@@ -157,8 +182,8 @@ for simulation_id in simulation_range:
                 model.build(random_seed=stan_seed);
                 model.fit_model()
 
+                fit_df  = model.fit.to_frame()
                 map_fit = model.get_map()
-                fit_df = model.fit.to_frame()
                 fit_df["block"] = block_idx
                 fit_df["run"]   = run_idx
                 fit_df["simulation"]   = simulation_id
@@ -173,7 +198,7 @@ for simulation_id in simulation_range:
                 if(nback_depth >= 1):
                     true_param["repeat_bias_1_back"] = repeat_bias_1_back
                 if(context_depth >= 1):
-                    true_param["context_similarity_depth_1"] = different_context_weights[0],
+                    true_param["context_similarity_depth_1"] = different_context_weights[0]
                 if(context_depth >= 2):
                     true_param["context_similarity_depth_2"] = different_context_weights[1]
 

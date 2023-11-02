@@ -276,7 +276,7 @@ class cdCRP():
     
     @property
     def distinct_session_within_session_timeconstants(self) -> bool:
-        if(~hasattr(self, "_distinct_session_within_session_timeconstants")):
+        if(not hasattr(self, "_distinct_session_within_session_timeconstants")):
             self._distinct_session_within_session_timeconstants = True;
         return self._distinct_session_within_session_timeconstants
     @distinct_session_within_session_timeconstants.setter
