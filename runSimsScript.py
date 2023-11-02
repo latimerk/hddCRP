@@ -28,7 +28,7 @@ block_range = range(min_blocks, max_blocks+1)
 run_range = range(0, 50)
 
 results_directory = "Results/Simulations/"
-OVERWRITE = True;
+OVERWRITE = False;
 
 
 if(not os.path.exists(results_directory)):
@@ -171,8 +171,8 @@ for simulation_id in simulation_range:
                     subject_labels += [jj] * len(seqs_c)
                     session_labels_all += session_labels(block_idx)
                     seqs += seqs_c;
-                print(f"BLOCK {block_idx} - RUN {run_idx}")
                 print(seqs)
+                print(f"BLOCK {block_idx} - RUN {run_idx}")
 
                 model = cdCRP(seqs, subject_labels=subject_labels, session_labels=session_labels_all);
                 model.same_nback_depth = nback_depth;

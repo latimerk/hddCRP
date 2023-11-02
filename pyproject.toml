@@ -21,7 +21,8 @@ dependencies = [
     "cython",
     "pystan",
     "nest_asyncio",
-    "statannotations"
+    "statannotations",
+    "scikit-learn"
 ]
 
 [build-system]
