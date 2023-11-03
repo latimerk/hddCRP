@@ -23,10 +23,9 @@ def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
     if(np.any(different_context_weights > 1)):
         warnings.warn("Context weights in model are assumed to be <= 1. Values > 1 found.")
     log_different_context_weights = np.log(1.0-different_context_weights)
-    if(repeat_bias_1_back is None):
-        repeat_bias_1_back = 1
-    assert np.isscalar(repeat_bias_1_back) and repeat_bias_1_back > 0, "repeat_bias_1_back must be a positive scalar"
-    log_repeat_bias_1_back = np.log(repeat_bias_1_back)
+    if(not (repeat_bias_1_back is None)):
+        assert np.isscalar(repeat_bias_1_back) and repeat_bias_1_back > 0, "repeat_bias_1_back must be a positive scalar"
+        log_repeat_bias_1_back = np.log(repeat_bias_1_back)
     
 
     num_responses = int(num_responses)
@@ -54,6 +53,11 @@ def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
     if(rng is None):
         rng = np.random.default_rng()
 
+    printed_within_timescale = {str(xx) : False for xx in within_session_timescales.keys()}
+    printed_repeat_bias_1_back = False
+    printed_different_context_weights = [False for xx in range(depth)]
+    print("alpha = " + str(alpha))
+    # raise RuntimeError()
 
     for tt in range(T_total):
         #
@@ -75,9 +79,13 @@ def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
 
         # get base measure
         base_measure_c = base_measure.copy()
-        if(one_back >= 0):
-            base_measure_c[one_back] *= repeat_bias_1_back
-            base_measure_c /= np.sum(base_measure_c)
+        if(not (repeat_bias_1_back is None)):
+            if(one_back >= 0):
+                base_measure_c[one_back] *= repeat_bias_1_back
+                base_measure_c /= np.sum(base_measure_c)
+            if(not printed_repeat_bias_1_back):
+                print("repeat_bias_1_back = " + str(repeat_bias_1_back))
+                printed_repeat_bias_1_back= True
         # print(base_measure_c)
 
         # set up previous observations
@@ -86,20 +94,27 @@ def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
         tau_within = (within_session_timescales[labels[tt]]);
         dts = (trial_time - tts_trial[:tt][in_session]);
         ws[in_session] += -dts/tau_within
+        if(not printed_within_timescale[str(labels[tt])]):
+            printed_within_timescale[str(labels[tt])] = True
+            print("tau " + str(labels[tt]) + " = " + str(tau_within) )
+
         #print(ws[in_session])
 
         if(not (between_session_timescales is None)):
             out_session = ~in_session
-            dts = (trial_time - tts_session[:tt][out_session])
+            dts = (session - tts_session[:tt][out_session])
             taus = np.array([between_session_timescales[xx, labels[tt]] for xx in labels[:tt][out_session]],dtype=float)
             ws[out_session] += -dts/taus
 
         context_match = contexts[:tt, :] == np.reshape(contexts[tt, :], (1,depth))
         for dd in range(depth):
-            different_context = ~np.all(context_match[:,:depth+1], axis=1)
+            different_context = np.logical_not(np.all(context_match[:,:dd+1], axis=1))
             ws[different_context] += log_different_context_weights[dd]
+            if(not printed_different_context_weights[dd]):
+                print("different_context_weights " + str(dd) + " = " + str(different_context_weights[dd]))
+                printed_different_context_weights[dd] = True
 
-        if(repeat_bias_in_connection_weights):
+        if(repeat_bias_in_connection_weights and (not (repeat_bias_1_back is None))):
             ws[Y[:tt] == one_back] += log_repeat_bias_1_back
 
         # sum up observations

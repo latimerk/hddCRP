@@ -226,7 +226,7 @@ transformed data {
     if(same_nback_depth > 0):
         depth = 1;
         model_block += f"""    vector[N] BaseMeasure;
-    BaseMeasure = ((repeat_bias_1_back-1.0) * Y_is_same_as_{depth}_back + 1.0) / (repeat_bias_1_back + (M-1.0));
+    BaseMeasure = ((repeat_bias_1_back-1.0) * Y_is_same_as_{depth}_back + 1.0) ./ (repeat_bias_1_back + (M-1.0));
 """
     else:
         model_block += """    real BaseMeasure;
@@ -260,12 +260,12 @@ transformed data {
     space_str = ""
     space_str_b = "                                                   "
     for ii in within_session_timeconstants:
-        model_block += f"""{space_str} -(deltas_{ii}/timeconstant_within_session_{ii})
+        model_block += f"""{space_str} -(deltas_{ii}./timeconstant_within_session_{ii})
 """
         space_str = space_str_b
 
     for ii in session_interaction_types:
-        model_block += f"""{space_str} -(deltas_session_{ii}/timeconstant_within_session_{ii})
+        model_block += f"""{space_str} -(deltas_session_{ii}./timeconstant_within_session_{ii})
 """
         space_str = space_str_b
         
