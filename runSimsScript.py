@@ -34,7 +34,7 @@ OVERWRITE = False;
 if(not os.path.exists(results_directory)):
     os.makedirs(results_directory)
 
-nback_depth   = 1;
+nback_depth   = 0;
 context_depth = 1;
 
 

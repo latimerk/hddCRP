@@ -185,7 +185,13 @@ class cdCRP_priorParams():
             raise ValueError("same_nback must be non-negative integer or None")
 
 class cdCRP():
-    def __init__(self, sequences : list[ArrayLike] | ArrayLike, subject_labels : list[float|int] = None, session_times : list[float|int]=None, session_labels : ArrayLike =None, possible_observations : ArrayLike = None, same_nback_depth : int = 1, context_depth : int = 2):
+    def __init__(self, sequences : list[ArrayLike] | ArrayLike,
+                 subject_labels : list[float|int] = None,
+                 population_labels : list[float|int] = None,
+                 session_times : list[float|int]=None,
+                 session_labels : ArrayLike =None,
+                 possible_observations : ArrayLike = None,
+                 same_nback_depth : int = 1, context_depth : int = 2):
         assert len(sequences) > 0, "sequences cannot be empty"
         if(np.isscalar(sequences[0])):
             sequences = [sequences];  # if is single session
@@ -209,6 +215,16 @@ class cdCRP():
         assert len(subject_labels) == self.num_sessions, "if subject_labels are given, must be of length equal to the number of sequences"
         self.subject_labels = np.array(subject_labels, dtype="object").flatten();
     
+        if((population_labels is None)):
+            population_labels = self.subject_labels
+        if(np.isscalar(population_labels)):
+            population_labels = [population_labels] * self.num_sessions
+        assert len(population_labels) == self.num_sessions, "if population_labels are given, must be of length equal to the number of sequences"
+        self.population_labels = np.array(population_labels, dtype="object").flatten();
+
+        for sub in self.subjects:
+            assert np.unique(self.population_labels[self.subject_labels == sub]).size == 1, "subject cannot be placed in multiple populations in different sessions"
+
         if(possible_observations is None): # all possible actions are observed
             possible_observations = np.unique(np.concatenate([np.unique(ss) for ss in sequences]))
         possible_observations.sort();
@@ -230,10 +246,31 @@ class cdCRP():
 
         self.posterior = None;
         self.fit = None;
+    
+        self.session_interactions_enabled = True
+
+
+        self.population_shared_within_session_timescale  = True;
+        self.population_shared_between_session_timescale = True;
+        self.population_shared_alpha      = True;
+        self.population_shared_context    = [True] * self.context_depth;
+        self.population_shared_same_nback = [True] * self.same_nback_depth;
+    
+    @property
+    def is_population_partial(self) -> bool:
+        return self.is_population and (not (np.all(self.population_shared_context) and 
+                                       np.all(self.population_shared_same_nback) and
+                                       self.population_shared_alpha and
+                                       self.population_shared_between_session_timescale and
+                                       self.population_shared_within_session_timescale ));
 
     @property
     def is_population(self) -> bool:
-        return len(self.subjects) > 1;
+        return self.num_subjects > 1;
+
+    @property
+    def is_multipopulation(self) -> bool:
+        return self.num_populations > 1;
 
     @property
     def num_sessions(self) -> int:
@@ -257,6 +294,13 @@ class cdCRP():
     @property
     def num_session_types(self) -> list[int]:
         return len(self.session_types);
+
+    @property
+    def populations(self) -> list[int]:
+        return np.unique(self.population_labels);
+    @property
+    def num_populations(self) -> int:
+        return len(self.populations);
 
     @property
     def subjects(self) -> list[int]:
@@ -395,17 +439,19 @@ class cdCRP():
 
     def get_all_interaction_types(self) -> list[tuple]:
         interaction_types = []
-        is_same_subject      = self.subject_labels[:,np.newaxis] == self.subject_labels[np.newaxis,:]
-        is_before            = self.session_times[ :,np.newaxis] <  self.session_times[np.newaxis,:]
-        possible_interaction = is_same_subject & is_before
 
-        for aa in self.session_types:
-            aa_i = np.where(self.session_labels == aa)[0]
-            for bb in self.session_types:
-                bb_i = np.where(self.session_labels == bb)[0]
+        if(self.session_interactions_enabled):
+            is_same_subject      = self.subject_labels[:,np.newaxis] == self.subject_labels[np.newaxis,:]
+            is_before            = self.session_times[ :,np.newaxis] <  self.session_times[np.newaxis,:]
+            possible_interaction = is_same_subject & is_before
 
-                if(np.any(possible_interaction[aa_i,bb_i])):
-                    interaction_types += [(aa,bb)]
+            for aa in self.session_types:
+                aa_i = np.where(self.session_labels == aa)[0]
+                for bb in self.session_types:
+                    bb_i = np.where(self.session_labels == bb)[0]
+
+                    if(np.any(possible_interaction[aa_i,bb_i])):
+                        interaction_types += [(aa,bb)]
         return interaction_types;
 
     def _to_interaction_name(self, types : tuple[str,str]) -> str:
@@ -464,9 +510,20 @@ class cdCRP():
             ctr += ss.shape[0];
         return C
 
+    def get_population(self, sub):
+        ii = self.subject_labels.tolist().index(sub)
+        return self.populations.tolist().index(self.population_labels[ii])
 
     def setup_concatenated_start_times_per_subject(self) -> np.ndarray:
         return np.concatenate([[0],self.observations_per_subject]).astype(int).cumsum()
+    
+    def setup_population_dummies(self) -> np.ndarray:
+        tts = self.setup_concatenated_start_times_per_subject();
+        Z = np.zeros((self.total_observations, self.num_populations), dtype=int);
+        for ii in range(self.num_subjects):
+            Z[tts[ii]:tts[ii+1], self.get_population(self.subjects[ii])] = 1;
+        return Z
+
 
     def to_dict(self) -> dict:
         
@@ -501,6 +558,51 @@ class cdCRP():
                 data[f"is_same_{depth}_back"] = self._stack_arrays([np.tril(nback_c[:,np.newaxis] == base_c[np.newaxis,:]).astype(int) for nback_c, base_c in zip(nback, base)])
 
 
+        if(self.is_population_partial):
+            Z = self.setup_population_dummies();
+            if(not self.population_shared_alpha):
+                data["P_alpha"] = self.num_populations
+                data["alpha_loadings"] = Z
+            else:
+                data["P_alpha"] = 1
+                data["alpha_loadings"] = np.ones((self.total_observations,1),dtype=int)
+
+            if(not self.population_shared_within_session_timescale):
+                data["P_within_session_timeconstants"] = self.num_populations
+                for ii in self.get_within_session_timeconstant_labels():
+                    data[f"timeconstant_within_session_{ii}_loadings"] = Z
+            else:
+                data["P_within_session_timeconstants"] = 1
+                for ii in self.get_within_session_timeconstant_labels():
+                    data[f"timeconstant_within_session_{ii}_loadings"] = np.ones((self.total_observations,1),dtype=int)
+
+
+            if(not self.population_shared_between_session_timescale):
+                data["P_between_session_timeconstants"] = self.num_populations
+                for ii in self.get_all_interaction_types():
+                    data[f"timeconstant_between_sessions_{ii}_loadings"] = Z
+            else:
+                data["P_between_session_timeconstants"] = 1
+                for ii in self.get_all_interaction_types():
+                    data[f"timeconstant_between_sessions_{ii}_loadings"] = np.ones((self.total_observations,1),dtype=int)
+
+            for ii in range(self.context_depth):
+                if(not self.population_shared_context[ii]):
+                    data[f"P_context_similarity_depth_{ii+1}"] = self.num_populations
+                    data[f"context_similarity_depth_{ii+1}_loadings"] = Z
+                else:
+                    data[f"P_context_similarity_depth_{ii+1}"] = 1
+                    data[f"context_similarity_depth_{ii+1}_loadings"] = np.ones((self.total_observations,1),dtype=int)
+
+            for ii in range(self.same_nback_depth):
+                if(not self.population_shared_same_nback[ii]):
+                    data[f"P_repeat_bias_{ii+1}_back"] = self.num_populations
+                    data[f"repeat_bias_{ii+1}_back_loadings"] = Z
+                else:
+                    data[f"P_repeat_bias_{ii+1}_back"] = 1
+                    data[f"repeat_bias_{ii+1}_back_loadings"] = np.ones((self.total_observations,1),dtype=int)
+
+
         data.update(self.setup_session_interaction_times())
 
         data.update(self.priors.to_dict())
@@ -531,13 +633,21 @@ class cdCRP():
         model_str += f"repeat_{repeat_depth}" 
 
 
-        session_interaction_types = self.get_all_interaction_types()
+        session_interaction_types    = self.get_all_interaction_types()
         within_session_timeconstants = self.get_within_session_timeconstant_labels()
 
-        return stanModels.generate_stan_code_individual(session_interaction_types=session_interaction_types,
-                                                        within_session_timeconstants=within_session_timeconstants,
-                                                        context_depth=self.context_depth,
-                                                        same_nback_depth=self.same_nback_depth);
+
+        if(self.is_population_partial):
+            return stanModels.generate_stan_code_population_shared_parameters(session_interaction_types=session_interaction_types,
+                                                            within_session_timeconstants=within_session_timeconstants,
+                                                            context_depth=self.context_depth,
+                                                            same_nback_depth=self.same_nback_depth);
+
+        else:
+            return stanModels.generate_stan_code_individual(session_interaction_types=session_interaction_types,
+                                                            within_session_timeconstants=within_session_timeconstants,
+                                                            context_depth=self.context_depth,
+                                                            same_nback_depth=self.same_nback_depth);
 
 
     def build(self, random_seed : int) -> stan.model.Model:
@@ -574,7 +684,27 @@ class cdCRP():
             "90.0%": lambda x: np.percentile(x, 90.0),
             "75.0%": lambda x: np.percentile(x, 75.0),
         }
-        return az.summary(self.fit, stat_funcs=func_dict)
+        sum_df =  az.summary(self.fit, stat_funcs=func_dict).sort_index()
+        s = sum_df.loc["log_like":"log_likf"].index
+
+        return sum_df.drop(index=s)
+    
+    def waic(self, **kwargs) -> az.ELPDData:
+        if(self.fit is None):
+            raise ValueError("Model not fit yet!")
+
+        c = az.convert_to_inference_data(self.fit)
+        c.sample_stats["log_likelihood"] = c.posterior["log_likelihood"]
+        return az.waic(c, **kwargs)
+    
+    def loo(self, **kwargs) -> az.ELPDData:
+        if(self.fit is None):
+            raise ValueError("Model not fit yet!")
+
+        c = az.convert_to_inference_data(self.fit)
+        c.sample_stats["log_likelihood"] = c.posterior["log_likelihood"]
+        return az.loo(c, **kwargs)
+
     
     def log_prob(self, unconstrained_parameters: ArrayLike, adjust_transform: bool = True, return_inf_at_error : bool = True, print_error : bool = False) -> float:
         if(np.any(np.isnan(unconstrained_parameters))):
