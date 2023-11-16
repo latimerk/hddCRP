@@ -1,4 +1,4 @@
-
+from __future__ import annotations
 
 def generate_stan_code_individual(within_session_timeconstants : list,
                                   session_interaction_types : list,
@@ -691,3 +691,4 @@ generated quantities {lb}
     stan_model = data_block + transformed_data_block + parameters_block + transformed_parameters_block + model_block + generated_quantities_block
 
     return stan_model
+
