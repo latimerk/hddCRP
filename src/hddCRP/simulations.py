@@ -83,9 +83,10 @@ def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
             if(one_back >= 0):
                 base_measure_c[one_back] *= repeat_bias_1_back
                 base_measure_c /= np.sum(base_measure_c)
-            if(not printed_repeat_bias_1_back):
-                print("repeat_bias_1_back = " + str(repeat_bias_1_back))
-                printed_repeat_bias_1_back= True
+                if(not printed_repeat_bias_1_back):
+                    print("repeat_bias_1_back = " + str(repeat_bias_1_back))
+                    print("\tbase measure" + str(base_measure_c))
+                    printed_repeat_bias_1_back= True
         # print(base_measure_c)
 
         # set up previous observations
@@ -127,6 +128,8 @@ def simulate_sessions(session_lengths : ArrayLike, session_labels : ArrayLike,
         ps = ts / np.sum(ts)
 
         Y[tt] = rng.choice(num_responses, p=ps);
+        if(tt < 5):
+            print(f"t {tt}: {ps}, {ts}, {Y[tt]}")
 
     session_starts = np.concatenate([[0], np.cumsum(session_lengths)])
 

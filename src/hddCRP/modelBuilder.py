@@ -248,7 +248,7 @@ class cdCRP():
         self.fit = None;
     
         self.session_interactions_enabled = True
-
+        self.within_session_decay_enabled = True
 
         self.population_shared_within_session_timescale  = True;
         self.population_shared_between_session_timescale = True;
@@ -408,7 +408,9 @@ class cdCRP():
 
 
     def get_within_session_timeconstant_labels(self) -> list[str]:
-        if(not self.distinct_session_within_session_timeconstants):
+        if(not self.within_session_decay_enabled):
+            return []
+        elif(not self.distinct_session_within_session_timeconstants):
             return ["ALL"]
         else:
             return [str(ss) for ss in self.session_types]
