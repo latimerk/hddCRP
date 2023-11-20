@@ -28,7 +28,7 @@ block_range = range(min_blocks, max_blocks+1)
 run_range = range(0, 50)
 
 results_directory = "Results/Simulations/"
-OVERWRITE = True;
+OVERWRITE = False;
 
 
 if(not os.path.exists(results_directory)):
