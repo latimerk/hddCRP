@@ -28,7 +28,7 @@ block_range = range(min_blocks, max_blocks+1)
 run_range = range(0, 50)
 
 results_directory = "Results/Simulations/"
-OVERWRITE = False;
+OVERWRITE = True;
 
 
 if(not os.path.exists(results_directory)):
@@ -199,6 +199,28 @@ for simulation_id in simulation_range:
         session_lengths = lambda n_blocks : [25 * n_blocks ];
         num_subjects = lambda n_blocks :  1;
         num_responses = 8
+    elif(simulation_id == 14):
+        alpha = 10
+        different_context_weights = [0.2, 0.2];
+        within_session_timescales  = {"A" : 20}
+        between_session_timescales = None; #{("A","A") : 2}
+        repeat_bias_1_back = 0.5
+
+        session_labels  = lambda n_blocks : ["A"] ;
+        session_lengths = lambda n_blocks : [25 * n_blocks ];
+        num_subjects = lambda n_blocks : 1;
+        num_responses = 3
+    elif(simulation_id == 15):
+        alpha = 10
+        different_context_weights = [0.2, 0.2];
+        within_session_timescales  = {"A" : 20}
+        between_session_timescales = None; #{("A","A") : 2}
+        repeat_bias_1_back = 0.5
+
+        session_labels  = lambda n_blocks : ["A"] ;
+        session_lengths = lambda n_blocks : [25 * n_blocks ];
+        num_subjects = lambda n_blocks : 1;
+        num_responses = 3
     else:
         raise NotImplementedError("No sim found")
     
@@ -247,10 +269,13 @@ for simulation_id in simulation_range:
 
                 model = cdCRP(seqs, subject_labels=subject_labels, session_labels=session_labels_all, possible_observations=list(range(num_responses)));
                 model.same_nback_depth = nback_depth;
-                model.context_depth = context_depth;
+                model.context_depth    = context_depth;
                 model.within_session_decay_enabled = include_tau
+
+                if(simulation_id == 15):
+                    model.priors.set_alpha_scale(4)
+                    model.priors.set_alpha_shape(2)
                 
-                model.context_depth = len(different_context_weights)
                 model.build(random_seed=stan_seed);
                 model.fit_model()
 
