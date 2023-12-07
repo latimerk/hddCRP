@@ -255,6 +255,22 @@ class cdCRP():
         self.population_shared_alpha      = True;
         self.population_shared_context    = [True] * self.context_depth;
         self.population_shared_same_nback = [True] * self.same_nback_depth;
+
+
+    @property
+    def fixed_alpha(self) -> float | None:
+        if(not hasattr(self, "_fixed_alpha")):
+            self._fixed_alpha = None;
+        return self._fixed_alpha
+    @fixed_alpha.setter
+    def fixed_alpha(self, alpha : None | float) -> None:
+        if(not (alpha is None)):
+            assert np.isscalar(alpha), "fixed_alpha must be None or scalar"
+            alpha = float(alpha)
+            if(alpha <= 0):
+                alpha = None;
+        self._fixed_alpha = alpha
+
     
     @property
     def is_population_partial(self) -> bool:
@@ -271,6 +287,7 @@ class cdCRP():
     @property
     def is_multipopulation(self) -> bool:
         return self.num_populations > 1;
+
 
     @property
     def num_sessions(self) -> int:
@@ -604,6 +621,8 @@ class cdCRP():
                     data[f"P_repeat_bias_{ii+1}_back"] = 1
                     data[f"repeat_bias_{ii+1}_back_loadings"] = np.ones((self.total_observations,1),dtype=int)
 
+        if(not (self.fixed_alpha is None)):
+            data["alpha"] = self.fixed_alpha;
 
         data.update(self.setup_session_interaction_times())
 
@@ -649,7 +668,8 @@ class cdCRP():
             return stanModels.generate_stan_code_individual(session_interaction_types=session_interaction_types,
                                                             within_session_timeconstants=within_session_timeconstants,
                                                             context_depth=self.context_depth,
-                                                            same_nback_depth=self.same_nback_depth);
+                                                            same_nback_depth=self.same_nback_depth,
+                                                            fit_alpha=(self.fixed_alpha is None));
 
 
     def build(self, random_seed : int) -> stan.model.Model:
