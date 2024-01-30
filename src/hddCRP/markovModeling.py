@@ -1,7 +1,7 @@
 import numpy as np;
-from numpy.typing import ArrayLike
+import numpy.typing as npt
 
-def get_transition_count(seq : ArrayLike, depth : int = 2, symbols : int | list | None = None, return_symbols : bool = False) -> np.ndarray[int] | tuple[np.ndarray[int],np.ndarray[int]]:
+def get_transition_count(seq : npt.ArrayLike, depth : int = 2, symbols : int | list | None = None, return_symbols : bool = False) -> npt.NDArray[np.int_] | tuple[npt.NDArray[np.int_],npt.NDArray[np.int_]]:
     """ Counts all transitions observed in sequence to a specific depth.
 
     Args:
@@ -46,7 +46,7 @@ def get_transition_count(seq : ArrayLike, depth : int = 2, symbols : int | list 
         return transition_count_matrix
     
 
-def get_transition_probabilities(transition_count_matrix : np.ndarray[int], alpha : float | np.ndarray = 0, rng : np.random.Generator = None) -> np.ndarray[float]:
+def get_transition_probabilities(transition_count_matrix : npt.NDArray[np.int_], alpha : float | np.ndarray = 0, rng : np.random.Generator = None) -> npt.NDArray[np.float_]:
     """ Turns transitions counts into transition probabilities.
         Estimates can be regularized via an alpha term that acts as a Dirichlet prior.
         Samples from the posterior given the prior are drawn if a random number generator is provides.
@@ -92,7 +92,7 @@ def get_transition_probabilities(transition_count_matrix : np.ndarray[int], alph
     return transition_probabilities
 
 
-def get_transition_probabilities_hierarchical(transition_count_matrix : np.ndarray[int], alpha : float | list = 1, rng : np.random.Generator = None) -> np.ndarray[float]:
+def get_transition_probabilities_hierarchical(transition_count_matrix : npt.NDArray[np.int_], alpha : float | list = 1, rng : np.random.Generator = None) -> npt.NDArray[np.float_]:
     """ Turns transitions counts into transition probabilities with a cheap, hierchical regularizer.
         Samples from the posterior given the prior are drawn if a random number generator is provides.
         Estimates hierarchically by sequentially increasing the depth of the transition probabilities and using that distribution as a prior
@@ -128,7 +128,7 @@ def get_transition_probabilities_hierarchical(transition_count_matrix : np.ndarr
 
 
 
-def simulate_from_model(transition_probabilities : np.ndarray[float], initial_state : np.ndarray[int], rng : np.random.Generator, sim_length : int = 100, nsims : int = 1):
+def simulate_from_model(transition_probabilities : npt.NDArray[np.float_], initial_state : npt.NDArray[np.int_], rng : np.random.Generator, sim_length : int = 100, nsims : int = 1) -> npt.NDArray[np.int_]:
     """
     Args:
       transition_probabilities: Array of depth+1 dimensions. Each dimension is of size num_symbols.
