@@ -172,3 +172,18 @@ def simulate_from_model(transition_probabilities : npt.NDArray[np.float_], initi
             Y[tt,ss] = rng.choice(num_symbols, p=transition_probabilities[sub_seq])
 
     return Y
+
+def get_sequence_likelihood(seq : list | npt.ArrayLike, transition_probabilities : npt.NDArray[np.float_], return_individual : bool = False) -> float | tuple[float, npt.NDArray[np.float_]]:
+    depth = transition_probabilities.ndim - 1
+    seq = np.array(seq).ravel()
+
+    likelihoods = np.ones((seq.size))
+    likelihoods[:depth] = np.nan
+    for tt in range(depth, seq.size):
+        likelihoods[tt] = transition_probabilities[tuple(seq[tt-depth:tt+1])]
+
+    log_like = np.sum(np.log(likelihoods[depth:]))
+    if(return_individual):
+        return log_like, likelihoods
+    else:
+        return log_like
