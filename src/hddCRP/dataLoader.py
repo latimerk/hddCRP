@@ -40,9 +40,14 @@ def get_data(subject : str, return_session_labels : bool = False) -> list | tupl
 def get_phase1_(subject : str, offset : int, return_session_labels : bool = False) -> tuple[list,list]:
     seqs, session_types = get_data(subject, return_session_labels = True)
     idx = session_types.index('C')
-    ss = (idx + offset) % 2
+    if(offset is None):
+        ss = 0
+        dd = 2
+    else:
+        ss = (idx + offset) % 2
+        dd = 1
     if(return_session_labels):
-        return seqs[ss:idx:2], session_types[ss:idx:2]
+        return seqs[ss:idx:2], session_types[ss:idx:dd]
     else:
         return seqs[ss:idx:2]
 
@@ -50,6 +55,8 @@ def get_phase1_a(subject : str, return_session_labels : bool = False) -> list | 
     return get_phase1_(subject, 0, return_session_labels)
 def get_phase1_b(subject : str, return_session_labels : bool = False) -> list | tuple[list, list]:
     return get_phase1_(subject, 1, return_session_labels)
+def get_phase1(subject : str, return_session_labels : bool = False) -> list | tuple[list, list]:
+    return get_phase1_(subject, None, return_session_labels)
 
 def get_phase2(subject : str, return_session_labels : bool = False) -> list | tuple[list,list]:
     seqs, session_types = get_data(subject, return_session_labels = True)
