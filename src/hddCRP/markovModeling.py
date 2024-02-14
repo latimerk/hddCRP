@@ -1,7 +1,7 @@
 import numpy as np;
 import numpy.typing as npt
 
-def get_transition_count(seq : npt.ArrayLike, depth : int = 2, symbols : int | list | None = None, return_symbols : bool = False) -> npt.NDArray[np.int_] | tuple[npt.NDArray[np.int_],npt.NDArray[np.int_]]:
+def get_transition_count(seq : npt.ArrayLike, depth : int = 2, conditions : npt.ArrayLike = None, symbols : int | list | None = None, return_symbols : bool = False) -> npt.NDArray[np.int_] | tuple[npt.NDArray[np.int_],npt.NDArray[np.int_]]:
     """ Counts all transitions observed in sequence to a specific depth.
 
     Args:
@@ -33,11 +33,19 @@ def get_transition_count(seq : npt.ArrayLike, depth : int = 2, symbols : int | l
     seq_0 = np.zeros(seq.size, dtype=int)
     for ii,ss in enumerate(symbols):
         seq_0[seq == ss] = ii
-
-    transition_count_matrix = np.zeros((num_symbols,)*(depth + 1))
+    
+    if(conditions is not None):
+        unique_conds, cond_idx = np.unique(conditions,return_inverse=True)
+        num_conds = len(unique_conds)
+        transition_count_matrix = np.zeros((num_conds,) + (num_symbols,)*(depth + 1))
+    else:
+        transition_count_matrix = np.zeros((num_symbols,)*(depth + 1))
 
     for ii in range(depth,len(seq_0)):
-        sub_seq = tuple(seq_0[ii-depth:(ii+1)])
+        if(conditions is not None):
+            sub_seq = (cond_idx[ii-1],) + tuple(seq_0[ii-depth:(ii+1)])
+        else:
+            sub_seq = tuple(seq_0[ii-depth:(ii+1)])
         transition_count_matrix[sub_seq] += 1
 
     if(return_symbols):

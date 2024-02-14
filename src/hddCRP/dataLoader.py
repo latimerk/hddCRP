@@ -1,6 +1,6 @@
 
 import pickle
-
+import pandas as pd
 
 grp_names = ['diverse_TH', 'diverse_HT', 'uniform_H', 'uniform_T']
 grp_names_all = ['diverse_TH', 'diverse_HT', 'uniform_H', 'uniform_T', 'diverse', 'uniform']
@@ -65,3 +65,54 @@ def get_phase2(subject : str, return_session_labels : bool = False) -> list | tu
         return seqs[idx:], session_types[:idx]
     else:
         return seqs[idx:]
+    
+
+
+def load_raw_with_reward_phase2(subject : str, remove_last_trial : bool = True) -> [list,list]:
+    df = pd.read_csv(f"data/raw/{subject}_C.csv", index_col=0)
+    df.sort_values(["session", "on_time"], inplace=True)
+    df = df[["session", "Rewarded", "well_id", "on_time"]]
+    df["session_id"] = df.groupby(df["session"]).ngroup()
+    df["trial_number"] = df.groupby("session_id")["well_id"].transform(lambda rr : (rr != rr.shift()).cumsum() - 1)
+
+    def get_first_well_entry(pp):
+        xx = pp.iloc[0]
+        xx["Rewarded"] = pd.Series.any(pp["Rewarded"])
+        return xx
+    df = df.groupby(["session","trial_number"],as_index=False).apply(get_first_well_entry)
+    df.sort_values(["session", "trial_number"], inplace=True)
+
+
+    def turns(well_id):
+        well_id -= 1
+        ss = (well_id == (well_id.shift() + 2) % 4);
+        ll = (well_id == (well_id.shift() + 1) % 4);
+        rr = (well_id == (well_id.shift() - 1) % 4);
+        well_id = well_id.astype(str)
+        well_id[:] = "None"
+        well_id[ss] = "Straight"
+        well_id[ll] = "Left"
+        well_id[rr] = "Right"
+        return well_id
+
+    df["turn"] = df.groupby(["session"],as_index=False)["well_id"].transform(turns)
+    df["turn_idx"] = df["turn"].map({"None" : pd.NA, "Straight" : 1, "Left" : 0, "Right" : 2})
+
+    grouped = df.groupby(["session_id"])
+
+    seqs = []
+    reward = []
+    session_labels = []
+    for session, group in grouped:
+        session_labels.append(group["session"].iloc[0])
+        tts = group["turn_idx"]
+        rrs = group["Rewarded"]
+        # wws = group["well_id"]
+        rrs = rrs[pd.notna(tts)].values
+        tts = tts[pd.notna(tts)].values
+        if(remove_last_trial):
+            tts = tts[:-1]
+            rrs = rrs[:-1]
+        seqs.append(list(tts))
+        reward.append(list(rrs))
+    return seqs, reward
