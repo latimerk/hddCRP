@@ -99,7 +99,7 @@ model {
 
     vector[N*K] ps;
     weights_all_obs   =  -(delta_ts./timeconstant_within_session_A)
-                                                   + (log1m(subject_similarity) - log(K-1))  * different_subjects
+                                                   + (log1m(subject_similarity)  * different_subjects)
                                                    + (log1m(context_similarity_depth_1)  * is_different_context_1);
     for(mm in 1:M) {
         weights_all_obs += log1m(context_similarity_depth_2[mm])  * context_depth_2[mm];
