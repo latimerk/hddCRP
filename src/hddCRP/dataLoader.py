@@ -115,7 +115,7 @@ def load_raw_with_reward_phase2(subject : str, remove_last_trial : bool = True) 
         rrs = rrs[pd.notna(tts)].values
         tts = tts[pd.notna(tts)].values
         if(remove_last_trial):
-            tts = tts[:-1]
+            tts = tts[:-1] # needed to cut out the last one to match the turn data structure
             rrs = rrs[:-1]
         seqs.append(list(tts))
         reward.append(list(rrs))
