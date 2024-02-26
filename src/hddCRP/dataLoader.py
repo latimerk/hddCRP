@@ -20,14 +20,18 @@ def get_subjects(grp_name : str = None) -> list:
 
     return subjects
 
-def get_group(subject : str) -> str:
+def get_group(subject : str, full : bool = True) -> str:
     data = open_data()       
     
     grps = data["group_definition"];
     # grp_names = ['diverse_TH', 'diverse_HT', 'uniform_H', 'uniform_T']
     for grp_name in grp_names:
         if(subject in grps[grp_name]):
-            return grp_name
+            if(full):
+                grp_name_c = grp_name
+            else:
+                grp_name_c = grp_name.split("_")[0]
+            return grp_name_c
     return None
 
 def get_data(subject : str, return_session_labels : bool = False) -> list | tuple[list,list]:

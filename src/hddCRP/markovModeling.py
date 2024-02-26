@@ -195,3 +195,19 @@ def get_sequence_likelihood(seq : list | npt.ArrayLike, transition_probabilities
         return log_like, likelihoods
     else:
         return log_like
+    
+def get_sequence_likelihood_with_condition(seq : list | npt.ArrayLike, condition : list | npt.ArrayLike, transition_probabilities : npt.NDArray[np.float_], return_individual : bool = False) -> float | tuple[float, npt.NDArray[np.float_]]:
+    depth = transition_probabilities.ndim - 2
+    seq = np.array(seq).ravel()
+    condition = np.array(condition).ravel()
+
+    likelihoods = np.ones((seq.size))
+    likelihoods[:depth] = np.nan
+    for tt in range(depth, seq.size):
+        likelihoods[tt] = transition_probabilities[(condition[tt-1],) + tuple( seq[tt-depth:tt+1])]
+
+    log_like = np.sum(np.log(likelihoods[depth:]))
+    if(return_individual):
+        return log_like, likelihoods
+    else:
+        return log_like
