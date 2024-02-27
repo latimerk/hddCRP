@@ -172,18 +172,31 @@ transformed data {
                         is_same[oo_a+aa, oo_b+bb] = 1;
                     }
 
+                    //if(aa > 1 && bb > 1) {
+                    //    int Y_c = Y[aa-1,jj];
+                    //    if(Y_c != Y[bb-1,kk]) {
+                    //        context_depth_1[oo_a+aa, oo_b+bb] = 1;
+                    //        // context_depth_2 all 0's
+                    //    }
+                    //    else if(aa > 2 && bb > 2) {
+                    //        // context_depth_1 = 0
+                    //        if(Y[aa-2,kk] != Y[bb-2,kk]) {
+                    //            context_depth_2[Y_c][oo_a+aa, oo_b+bb] = 1;
+                    //        }
+                    //    } // else: context_depth_1 = context_depth_2 = 0
+                    //}
                     if(aa > 1 && bb > 1) {
                         int Y_c = Y[aa-1,jj];
-                        if(Y_c != Y[bb-1,kk]) {
-                            context_depth_1[oo_a+aa, oo_b+bb] = 1;
-                            // context_depth_2 all 0's
+                        if(Y[aa-1,kk] != Y[bb-1,kk]) {
+                            context_depth_2[Y_c][oo_a+aa, oo_b+bb] = 1;
+                            // context_depth_1[oo_a+aa, oo_b+bb] = 1;
                         }
-                        else if(aa > 2 && bb > 2) {
-                            // context_depth_1 = 0
-                            if(Y[aa-2,kk] != Y[bb-2,kk]) {
-                                context_depth_2[Y_c][oo_a+aa, oo_b+bb] = 1;
+                        if(aa > 2 && bb > 2) {
+                            if(Y[aa-1,kk] == Y[bb-1,kk] && Y[aa-2,kk] != Y[bb-2,kk]) {
+                               // context_depth_2[Y_c][oo_a+aa, oo_b+bb] = 1;
+                               context_depth_1[oo_a+aa, oo_b+bb] = 1;
                             }
-                        } // else: context_depth_1 = context_depth_2 = 0
+                        }
                     }
                 }
             }
