@@ -4,7 +4,8 @@ def generate_stan_code_individual(within_session_timeconstants : list,
                                   session_interaction_types : list,
                                   context_depth : int,
                                   same_nback_depth : int,
-                                  repeat_bias_in_connection_weights : bool = False) -> str:
+                                  repeat_bias_in_connection_weights : bool = False,
+                                  fit_alpha : bool = True) -> str:
     context_depth = max(0, int(context_depth))
     same_nback_depth = max(0, int(same_nback_depth))
 
@@ -30,10 +31,18 @@ data {
     int T; // max observation distance
     int K; // number of subjects that are stacked on top of each other
     array[K+1] int subject_start_idx; // first element should be 1, last element should be N+1
+"""
 
+    if(fit_alpha):
+        data_block += """
     real prior_alpha_shape;
     real prior_alpha_scale;
-"""
+    """
+    else:
+        data_block += """
+    real alpha;
+    """
+
     
     for ii in session_interaction_types:
          data_block += f"""    array[N,2] real session_time_{ii}; // column 1: projecting time, column 2: receiving time; if negative, doesn't do either
@@ -179,7 +188,8 @@ transformed data {
     {rb}
 """
 
-    transformed_data_block += """
+    if(fit_alpha):
+        transformed_data_block += """
     // prior parameter transformations for computations
     real prior_alpha_scale_inv = inv(prior_alpha_scale);
 """
@@ -202,6 +212,10 @@ transformed data {
 """
 
     parameters_block = """parameters {
+    """
+
+    if(fit_alpha):
+        parameters_block += """
     real<lower=0> alpha;   
 """
     for ii in within_session_timeconstants: 
@@ -228,10 +242,10 @@ transformed data {
 model {
 """
 
-    
-    model_block += """
+    if(fit_alpha):
+        model_block += """
     alpha                         ~ gamma(prior_alpha_shape,                         prior_alpha_scale_inv);
-"""
+    """
     
     for ii in within_session_timeconstants:
         model_block += f"""    timeconstant_within_session_{ii}   ~ gamma(prior_timeconstant_within_session_shape,   prior_timeconstant_within_session_scale_inv);
@@ -715,4 +729,3 @@ generated quantities {lb}
     stan_model = data_block + transformed_data_block + parameters_block + transformed_parameters_block + model_block + generated_quantities_block
 
     return stan_model
-

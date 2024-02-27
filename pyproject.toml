@@ -21,7 +21,6 @@ dependencies = [
     "cython",
     "pystan",
     "nest_asyncio",
-    "statannotations",
     "scikit-learn"
 ]
 

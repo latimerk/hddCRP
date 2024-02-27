@@ -1,0 +1,115 @@
+data {
+    int N; // Number of data points
+    int M; // number of possible observations
+    int K; // number of subjects that are stacked on top of each other
+    array[N, K] int Y;
+
+    real prior_alpha_shape;
+    real prior_alpha_scale;
+    
+    real prior_timeconstant_within_session_shape;
+    real prior_timeconstant_within_session_scale;
+    
+
+    real prior_context_similarity_depth_1_alpha;
+    real prior_context_similarity_depth_1_beta;
+
+    real prior_context_similarity_depth_2_alpha;
+    real prior_context_similarity_depth_2_beta;
+
+    
+    real prior_subject_similarity_alpha;
+    real prior_subject_similarity_beta;
+}
+
+transformed data {
+    matrix[N*K,N*K] valid    = rep_matrix(0, N*K, N*K);
+    matrix[N*K,N*K] is_same  = rep_matrix(0, N*K, N*K);
+    matrix[N*K,N*K] delta_ts = rep_matrix(0, N*K, N*K);
+
+    matrix[N*K,N*K] different_subjects = rep_matrix(0, N*K, N*K);
+
+    matrix[N*K,*KN] context_depth_1 = rep_matrix(0, N, N);
+    array[M] matrix[N*K,N*K] context_depth_2;
+
+    for(mm in 1:M) {
+        context_depth_2[mm] = rep_matrix(0, N, N);
+    }
+
+    for(jj in 1:K) {
+        int oo_a = (jj-1)*N;
+        for(kk in 1:K) {
+            int oo_b = (kk-1)*N;
+            for(aa in 1:N) {
+                for(bb in 1:(aa-1)) {
+                    delta_ts[oo_a + aa, oo_b+bb] = aa-bb;
+                    valid[oo_a + aa, oo_b+bb] = 1;
+                    if(jj != kk) {
+                        different_subjects[oo_a + aa, oo_b+bb] = 1;
+                    }
+                    if(Y[aa,jj] == Y[bb,kk]) {
+                        is_same[oo_a + aa, oo_b + bb] = 1;
+                    }
+
+                    if(aa > 1 && bb > 1) {
+                        Y_c = Y[aa-1,jj];
+                        if(Y_c != Y[bb-1,kk]) {
+                            context_depth_1[oo_a + aa, oo_b+bb] = 1;
+                        }
+                        else {
+                            if(aa > 2 && bb > 2) {
+                                if(Y[aa-2,kk] != Y[bb-2,kk]) {
+                                    context_depth_2[Y_c][oo_a + aa, oo_b+bb] = 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // prior parameter transformations for computations
+    real prior_alpha_scale_inv = inv(prior_alpha_scale);
+
+    real prior_timeconstant_within_session_scale_inv   = inv(prior_timeconstant_within_session_scale);
+    
+    // variables to turn main computation in matrix operations
+    vector[N*K] vs = rep_vector(1, N*K);
+    matrix[N*K,N*K] weights_same_obs;
+    matrix[N*K,N*K] weights_all_obs;
+}
+
+parameters {
+    
+    real<lower=0> alpha;   
+    real<lower=0> timeconstant_within_session_A;
+    real<lower=0,upper=1> subject_similarity;
+    real<lower=0,upper=1> context_similarity_depth_1;
+    vector<lower=0,upper=1>[M] context_similarity_depth_2;
+}
+model {
+
+    alpha                          ~ gamma(prior_alpha_shape,                         prior_alpha_scale_inv);
+    timeconstant_within_session_A  ~ gamma(prior_timeconstant_within_session_shape,   prior_timeconstant_within_session_scale_inv);
+    context_similarity_depth_1     ~ beta(prior_context_similarity_depth_1_alpha,   prior_context_similarity_depth_1_beta);
+    context_similarity_depth_2     ~ beta(prior_context_similarity_depth_2_alpha,   prior_context_similarity_depth_2_beta);
+    subject_similarity     ~ beta(prior_subject_similarity_alpha,   prior_subject_similarity_beta);
+
+
+    vector[N*K] ps;
+    weights_all_obs   =  -(delta_ts./timeconstant_within_session_A)
+                                                   + (log1m(subject_similarity)  * different_subjects)
+                                                   + (log1m(context_similarity_depth_1)  * is_different_context_1);
+    for(mm in 1:M) {
+        weights_all_obs += log1m(context_similarity_depth_2[mm])  * context_depth_2[mm];
+    }
+    weights_all_obs   = valid .* exp(weights_all_obs);
+
+    weights_same_obs  = is_same .* weights_all_obs;
+
+    // probability of drawing the observed observations given their pasts
+    ps =  ((weights_same_obs * vs) + (alpha/M)) ./  ((weights_all_obs * vs) + (alpha));
+    
+    1 ~ bernoulli(ps); // note: not generative - this is a simplified distribution to make the log likelihood computations work quickly in Stan
+}
