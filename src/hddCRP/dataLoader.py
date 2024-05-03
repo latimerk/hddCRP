@@ -2,7 +2,7 @@
 import pickle
 import numpy as np
 import pandas as pd
-
+import os.path
 grp_names = ['diverse_TH', 'diverse_HT', 'uniform_H', 'uniform_T']
 grp_names_all = ['diverse_TH', 'diverse_HT', 'uniform_H', 'uniform_T', 'diverse', 'uniform']
 
@@ -74,7 +74,26 @@ def get_phase2(subject : str, return_session_labels : bool = False) -> list | tu
 
 
 def load_raw_with_reward_phase2(subject : str, remove_last_trial : bool = True, use_turns : bool = True, use_recoded_turns : bool = False) -> [list,list]:
-    df = pd.read_csv(f"data/raw/{subject}_C.csv", index_col=0)
+    """ Loads the trials performed by a single rat during the plus maze phase from the raw csv files.
+        Includes the co-registered reward information.
+
+    Args:
+      subject: The name of the animal (e.g., A1)
+      remove_last_trial: removes last trial that I see in each session the csv files if true. This was needed to replicate what I saw in the processsed data file.
+
+    Returns:
+      sequences, rewards: Each return value is a list of the J sessions that the rat performed.
+        Each entry is a list of the actions (0=left turn, 1=straight, 2=right turn) and reward information (0=action not rewarded, 1=action rewarded) for each session.
+        For session jj, sequences[jj] is the list of actions and rewards[jj] is the rewards: therefore len(sequences[jj]) = len(rewards[jj]).
+    """
+
+    file_name = f"data/raw/{subject}_C.csv";
+
+    if(not os.path.exists(file_name)):
+        # NOTE: check to see if you have the data in the correct spots
+        raise RuntimeError(f"Raw data not found. Expected data file in path: {file_name}")
+
+    df = pd.read_csv(file_name, index_col=0)
     df.sort_values(["session", "on_time"], inplace=True)
     df = df[["session", "Rewarded", "well_id", "on_time"]]
     df["session_id"] = df.groupby(df["session"]).ngroup()
@@ -136,7 +155,7 @@ def load_raw_with_reward_phase2(subject : str, remove_last_trial : bool = True, 
         rrs = rrs[pd.notna(tts)].values
         tts = tts[pd.notna(tts)].values
         if(remove_last_trial):
-            tts = tts[:-1] # needed to cut out the last one to match the turn data structure
+            tts = tts[:-1] # NOTE: needed to cut out the last one to match the turn data structure
             rrs = rrs[:-1]
         seqs.append(list(tts))
         reward.append(list(rrs))

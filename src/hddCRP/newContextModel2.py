@@ -8,6 +8,19 @@ from hddCRP.markovModeling import get_sequence_likelihood_with_condition
 
 class populationOneBackRewardContextModel:
     def __init__(self, Y : npt.NDArray[np.int_], R : npt.NDArray[np.int_], base_measure : npt.NDArray = None):
+        """ Builds a distance-dependent CRP model for analyzing rat behavioral sequences.
+            Assumes a non-stationary Markov process where the probability of choosing action at time t depends on the action at t-1 and
+            if a reward was given at time t-1.
+            The model accepts multiple subjects with equal length observations.
+
+        Args:
+        Y: matrix N x K. The behavioral data. N is the length of the behavioral sequences (number of trails), and K is the number of subjects.
+            The entries should be integers from 0 to M-1.
+        R: matrix N x K. The reward data. N is the length of the behavioral sequences (number of trails), and K is the number of subjects.
+            The entries should be integers: 0 and 1 for no-reward or reward.
+        base_measure: Vector length M. the prior probabilities for each of the M actions.
+        """
+        
         assert Y.ndim == 2, "Y must be 2-D"
         # assert Y.shape[1] > 1, "currently, needs to be population model"
         self.Y_raw_ = Y
@@ -496,12 +509,25 @@ model {
 """
 
 def create_pop_model(grp : str, n_trials : int = 50, fold_turns : bool = False, last : bool = False, use_turns : bool = True) -> populationOneBackRewardContextModel:
+    """ Builds a ddCRP model for a group of subjects,
+
+    Args:
+      grp: The name of the group: "diverse_HT", "diverse_TH", "uniform_H", "uniform_T", "uniform", or "diverse"
+      ntrials: The number of trials to use in the model
+      fold_turns: If false, actions are "left", "straight", "right". If True, turns actions into binary "turn" or "straight"
+      last: Use last trials. If false, uses the first trials from the plus maze, if true, uses last ntrials trials.
+             
+    Returns:
+      The populationOneBackRewardContextModel containing the data.
+      By default, sets fit_base_measure_=True -> the model fits an alpha scale and the base measure (instead of assuming uniform choices a priori)
+    """
+
     subs = dl.get_subjects(grp);
     Y = np.ndarray((n_trials, len(subs)), dtype=int)
     R = np.ndarray((n_trials, len(subs)), dtype=int)
 
     for ii,sub in enumerate(subs):
-        seqs,rs = dl.load_raw_with_reward_phase2(sub, use_turns=use_turns)
+        seqs,rs = dl.load_raw_with_reward_phase2(sub, use_turns=use_turns) # NOTE: this function should be checked: figures out the reward info from the csv files
         seqs = np.concatenate(seqs);
         rs = np.concatenate(rs);
         if(last):
@@ -522,7 +548,18 @@ def create_pop_model(grp : str, n_trials : int = 50, fold_turns : bool = False, 
     return populationOneBackRewardContextModel(Y, R, base_measure=base_measure)
 
 def create_indiv_model(sub : str, n_trials : int = 50, fold_turns : bool = False, last : bool = False, use_turns : bool = True) -> populationOneBackRewardContextModel:
+    """ Builds a ddCRP model for a single subjects
 
+    Args:
+      sub: The name of the animal
+      ntrials: The number of trials to use in the model
+      fold_turns: If false, actions are "left", "straight", "right". If True, turns actions into binary "turn" or "straight"
+      last: Use last trials. If false, uses the first trials from the plus maze, if true, uses last ntrials trials.
+             
+    Returns:
+      The populationOneBackRewardContextModel containing the data.
+      By default, sets fit_base_measure_=False -> a single alpha value is fit and the base measure is uniform over the choices.
+    """
 
     seqs,rs = dl.load_raw_with_reward_phase2(sub, use_turns=use_turns)
     seqs = np.concatenate(seqs);
@@ -540,9 +577,4 @@ def create_indiv_model(sub : str, n_trials : int = 50, fold_turns : bool = False
     if(fold_turns and use_turns):
         Y[Y == 2] = 0
         base_measure = np.array([2, 1]);
-    elif(use_turns):
-        base_measure = np.ones((3))
-    else:
-        base_measure = np.ones((4))
-
     return populationOneBackRewardContextModel(Y, R, base_measure = base_measure)
