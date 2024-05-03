@@ -495,14 +495,13 @@ model {
 }
 """
 
-def create_pop_model(grp : str, n_trials : int = 50, fold_turns : bool = False, last : bool = False) -> populationOneBackRewardContextModel:
+def create_pop_model(grp : str, n_trials : int = 50, fold_turns : bool = False, last : bool = False, use_turns : bool = True) -> populationOneBackRewardContextModel:
     subs = dl.get_subjects(grp);
     Y = np.ndarray((n_trials, len(subs)), dtype=int)
     R = np.ndarray((n_trials, len(subs)), dtype=int)
-    base_measure = None
 
     for ii,sub in enumerate(subs):
-        seqs,rs = dl.load_raw_with_reward_phase2(sub)
+        seqs,rs = dl.load_raw_with_reward_phase2(sub, use_turns=use_turns)
         seqs = np.concatenate(seqs);
         rs = np.concatenate(rs);
         if(last):
@@ -512,16 +511,20 @@ def create_pop_model(grp : str, n_trials : int = 50, fold_turns : bool = False, 
             Y[:,ii] = seqs[:n_trials];
             R[:,ii] = rs[:n_trials];
 
-    if(fold_turns):
+    if(fold_turns and use_turns):
         Y[Y == 2] = 0
         base_measure = np.array([2, 1]);
+    elif(use_turns):
+        base_measure = np.ones((3))
+    else:
+        base_measure = np.ones((4))
+
     return populationOneBackRewardContextModel(Y, R, base_measure=base_measure)
 
-def create_indiv_model(sub : str, n_trials : int = 50, fold_turns : bool = False, last : bool = False) -> populationOneBackRewardContextModel:
+def create_indiv_model(sub : str, n_trials : int = 50, fold_turns : bool = False, last : bool = False, use_turns : bool = True) -> populationOneBackRewardContextModel:
 
-    base_measure = None
 
-    seqs,rs = dl.load_raw_with_reward_phase2(sub)
+    seqs,rs = dl.load_raw_with_reward_phase2(sub, use_turns=use_turns)
     seqs = np.concatenate(seqs);
     rs = np.concatenate(rs);
 
@@ -534,7 +537,12 @@ def create_indiv_model(sub : str, n_trials : int = 50, fold_turns : bool = False
         Y[:,0] = seqs[:n_trials];
         R[:,0] = rs[:n_trials];
 
-    if(fold_turns):
+    if(fold_turns and use_turns):
         Y[Y == 2] = 0
         base_measure = np.array([2, 1]);
+    elif(use_turns):
+        base_measure = np.ones((3))
+    else:
+        base_measure = np.ones((4))
+
     return populationOneBackRewardContextModel(Y, R, base_measure = base_measure)

@@ -1,5 +1,6 @@
 
 import pickle
+import numpy as np
 import pandas as pd
 
 grp_names = ['diverse_TH', 'diverse_HT', 'uniform_H', 'uniform_T']
@@ -72,7 +73,7 @@ def get_phase2(subject : str, return_session_labels : bool = False) -> list | tu
     
 
 
-def load_raw_with_reward_phase2(subject : str, remove_last_trial : bool = True) -> [list,list]:
+def load_raw_with_reward_phase2(subject : str, remove_last_trial : bool = True, use_turns : bool = True, use_recoded_turns : bool = False) -> [list,list]:
     df = pd.read_csv(f"data/raw/{subject}_C.csv", index_col=0)
     df.sort_values(["session", "on_time"], inplace=True)
     df = df[["session", "Rewarded", "well_id", "on_time"]]
@@ -98,9 +99,22 @@ def load_raw_with_reward_phase2(subject : str, remove_last_trial : bool = True) 
         well_id[ll] = "Left"
         well_id[rr] = "Right"
         return well_id
+    def recode_turns(turn_id):
+        sw = (turn_id == (turn_id.shift() + 2) % 3)
+        rp = (turn_id == (turn_id.shift() + 3) % 3)
+        st = (turn_id == 1)
+        na = (turn_id.shift(fill_value=pd.NA) == pd.NA)
+        turn_id[sw] = 0
+        turn_id[rp] = 2
+        turn_id[st] = 1
+        turn_id[na] = pd.NA
+        return turn_id
 
-    df["turn"] = df.groupby(["session"],as_index=False)["well_id"].transform(turns)
+    df["turn"]     = df.groupby(["session"],as_index=False)["well_id"].transform(turns)
     df["turn_idx"] = df["turn"].map({"None" : pd.NA, "Straight" : 1, "Left" : 0, "Right" : 2})
+
+    df["recoded_turn_idx"]     = df.groupby(["session"],as_index=False)["turn_idx"].transform(recode_turns)
+
 
     grouped = df.groupby(["session_id"])
 
@@ -109,9 +123,16 @@ def load_raw_with_reward_phase2(subject : str, remove_last_trial : bool = True) 
     session_labels = []
     for session, group in grouped:
         session_labels.append(group["session"].iloc[0])
-        tts = group["turn_idx"]
+
+
+        if(use_recoded_turns):
+            tts = group["recoded_turn_idx"]
+        elif(use_turns):
+            tts = group["turn_idx"]
+        else:
+            tts = group["well_id"]
+
         rrs = group["Rewarded"]
-        # wws = group["well_id"]
         rrs = rrs[pd.notna(tts)].values
         tts = tts[pd.notna(tts)].values
         if(remove_last_trial):
